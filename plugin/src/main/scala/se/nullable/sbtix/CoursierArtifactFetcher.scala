@@ -9,14 +9,22 @@ import coursier.core.Authentication
 import sbt.{Logger, ModuleID, Resolver, PatternsBasedRepository}
 
 import scalaz.concurrent.Task
-
-import scalaz.{-\/, \/-, EitherT}
+import scalaz.{-\/, EitherT, \/-}
 import java.util.concurrent.ConcurrentSkipListSet
+
 import scala.collection.JavaConverters._
 import java.util.concurrent.ExecutorService
+
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
 import java.nio.file.{StandardCopyOption, Files => NioFiles}
+
+import matryoshka.Coalgebra
+import matryoshka._
+import matryoshka.data._
+import matryoshka.implicits._
+import se.nullable.sbtix.data.RoseTreeF
+
 case class GenericModule(primaryArtifact: Artifact,
                          dep: Dependency,
                          localFile: java.io.File) {
@@ -68,7 +76,9 @@ case class GenericModule(primaryArtifact: Artifact,
     */
   val localSearchLocation = if (isIvy) {
     localFile.getParentFile().getParentFile()
-  } else { localFile.getParentFile() }
+  } else {
+    localFile.getParentFile()
+  }
 }
 
 case class MetaArtifact(artifactUrl: String, checkSum: String)
@@ -100,13 +110,13 @@ class CoursierArtifactFetcher(logger: Logger,
 
   def apply(depends: Set[Dependency])
     : (Set[NixRepo], Set[NixArtifact], Set[ResolutionErrors]) = {
-    val (mods1, errors) = depends.map(x => buildNixProject(x)).unzip
-
-    val mods = mods1.flatten
+    val (mods, errors) = buildNixProject(depends)
 
     //remove metaArtifacts that we already have a module for. We do not need to look them up twice.
     val metaArtifacts = metaArtifactCollector.asScala.toSet.filterNot { meta =>
-      mods.exists { meta.matchesGenericModule }
+      mods.exists {
+        meta.matchesGenericModule
+      }
     }
 
     //object to work with the rootUrl of Resolvers
@@ -124,7 +134,7 @@ class CoursierArtifactFetcher(logger: Logger,
 
     val nixRepos = (repoSeq ++ metaRepoSeq)
 
-    (nixRepos, nixArtifacts, errors)
+    (nixRepos, nixArtifacts, Set(errors))
   }
 
   /**
@@ -223,10 +233,22 @@ class CoursierArtifactFetcher(logger: Logger,
       }
   }
 
-  //coursier must take dependencies one at a time, otherwise it only resolves the most recent version of a module, which causes missed dependencies.
   private def buildNixProject(
-      module: Dependency): (Seq[GenericModule], ResolutionErrors) = {
-    val res = Resolution(Set(module))
+      modules: Set[Dependency]): (Set[GenericModule], ResolutionErrors) = {
+    val (dependenciesArtifacts, errors) = getAllDependencies(modules)
+    val genericModules = dependenciesArtifacts.flatMap {
+      case ((dependency, artifact)) =>
+        val downloadedArtifact = Cache.file(artifact).run.unsafePerformSync
+
+        downloadedArtifact.toOption.map { localFile =>
+          GenericModule(artifact, dependency, localFile)
+        }
+    }
+    (genericModules, errors)
+  }
+
+  private def getAllDependencies(modules: Set[Dependency])
+    : (Set[(Dependency, Artifact)], ResolutionErrors) = {
 
     val repos = resolvers.flatMap { resolver =>
       FromSbt.repository(resolver,
@@ -235,19 +257,127 @@ class CoursierArtifactFetcher(logger: Logger,
                          credentials.get(resolver.name).map(_.authentication))
     }
     val fetch = Fetch.from(repos.toSeq, CacheFetch_WithCollector())
-    val resolution = res.process.run(fetch, 100).unsafePerformSync
 
-    assert(resolution.isDone)
+    def go(modules: Set[Dependency])
+      : (Set[(Dependency, Artifact)], ResolutionErrors) = {
+      val res = Resolution(modules)
+      val resolution = res.process.run(fetch, 100).unsafePerformSync
+      val missingDependencies = findMissingDependencies(modules, resolution)
+      val resolvedMissingDependencies =
+        missingDependencies.map(dep => go(Set(dep)))
+      val artifacts = resolution
+        .dependencyArtifacts(true)
+        .toSet
+        // Get sources, useful for IDE integration
+        .union(
+          resolution
+            .dependencyClassifiersArtifacts(Seq("tests", "sources", "javadoc"))
+            .toSet)
+        .union(resolvedMissingDependencies.flatMap(_._1))
+      val errors = resolvedMissingDependencies.foldRight(
+        ResolutionErrors(resolution.errors))((resolved, acc) =>
+        acc + resolved._2)
+      (artifacts, errors)
+    }
 
-    val modules = resolution.dependencyArtifacts.flatMap {
-      case ((dependency, artifact)) =>
-        val downloadedArtifact = Cache.file(artifact).run.unsafePerformSync
+    go(modules)
+  }
 
-        downloadedArtifact.toOption.map { localFile =>
-          GenericModule(artifact, dependency, localFile)
+  private def findMissingDependencies(
+      dependencies: Set[Dependency],
+      resolution: Resolution): Set[Dependency] = {
+    dependencies.flatMap { dep =>
+      if (resolution.dependencies.contains(dep)) {
+        findMissingDependencies(dep, resolution)
+      } else {
+        Set(dep)
+      }
+    }
+  }
+
+  type F[X] = RoseTreeF[Dependency, X]
+  type G[X] = RoseTreeF[Either[Dependency, Dependency], X]
+
+  private def findMissingDependencies(
+      module: Dependency,
+      resolution: Resolution): Set[Dependency] = {
+
+    def getDeps(
+        withReconciledVersions: Boolean): Coalgebra[F, (Int, Dependency)] = {
+      case (0, dep) =>
+        RoseTreeF(dep, List.empty)
+      case (n, dep) =>
+        RoseTreeF(dep,
+                  resolution
+                    .dependenciesOf(dep, withReconciledVersions)
+                    .toList
+                    .map(d => (n - 1, d)))
+    }
+
+    // Get the dependency tree where versions where reconciled by coursier
+    val reconciled = (100, module).ana[Fix[F]](getDeps(true))
+    // Get the dependency tree with the raw ,non reconciled, versions
+    val raw = (100, module).ana[Fix[F]](getDeps(false))
+    // Diff the two dependency trees to find what was rejected by coursier
+    val treeDiff = diffDependencyTrees(raw, reconciled)
+
+    val possiblyMissingDependencies = treeDiff.cata[Set[Dependency]] {
+      case RoseTreeF(Right(_), children)  => children.toSet.flatten
+      case RoseTreeF(Left(dep), children) => children.toSet.flatten + dep
+    }
+    val missingDependencies =
+      possiblyMissingDependencies.diff(resolution.dependencies)
+    missingDependencies
+  }
+
+  private def diffDependencyTrees(raw: Fix[F], reconciled: Fix[F]): Fix[G] = {
+    val coalgebra: Coalgebra[G, Either[Fix[F], (Fix[F], Fix[F])]] = {
+      case Right((raw, reconciled)) =>
+        val rawMap = raw.unFix.children.map { t =>
+          t.unFix.value -> t.unFix.children
+        }.toMap
+        val recMap = reconciled.unFix.children.map { t =>
+          t.unFix.value -> t.unFix.children
+        }.toMap
+        val diff: List[Either[Fix[F], (Fix[F], Fix[F])]] =
+          rawMap.keySet
+            .diff(recMap.keySet)
+            .map { dep =>
+              val x: Either[Fix[F], (Fix[F], Fix[F])] =
+                Left(Fix[F](RoseTreeF(dep, rawMap(dep))))
+              x
+            }
+            .toList
+        val intersection: List[Either[Fix[F], (Fix[F], Fix[F])]] =
+          rawMap.keySet
+            .intersect(recMap.keySet)
+            .map { dep =>
+              val x: Either[Fix[F], (Fix[F], Fix[F])] = Right(
+                (Fix[F](RoseTreeF(dep, rawMap(dep))),
+                 Fix[F](RoseTreeF(dep, recMap(dep)))))
+              x
+            }
+            .toList
+        RoseTreeF(Right(raw.unFix.value), diff ++ intersection)
+      case Left(raw) =>
+        RoseTreeF(Left(raw.unFix.value),
+                  raw.unFix.children.map((g: Fix[F]) => Left(g)))
+    }
+
+    val algebra: Algebra[G, Fix[G]] = {
+      case RoseTreeF(d @ Left(dep), children) =>
+        Fix[G](RoseTreeF(d, children))
+      case RoseTreeF(Right(dep), children) =>
+        val newChildren = children.filter(_.unFix.value.isLeft)
+        if (newChildren.isEmpty) {
+          Fix[G](RoseTreeF(Right(dep), newChildren))
+        } else {
+          Fix[G](RoseTreeF(Left(dep), newChildren))
         }
     }
-    (modules, ResolutionErrors(resolution.errors))
+
+    val x: Either[Fix[F], (Fix[F], Fix[F])] = Right((raw, reconciled))
+    x.hylo[G, Fix[G]](algebra, coalgebra)
   }
 
   private def ivyProps =
