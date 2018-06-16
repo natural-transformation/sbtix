@@ -7,6 +7,7 @@ import java.security.MessageDigest
 import java.util.concurrent.Semaphore
 
 import sbt.Logger
+import sun.misc.IOUtils
 
 import scala.util.{Failure, Success, Try}
 
@@ -24,27 +25,17 @@ object FindArtifactsOfRepo {
   }
 
   private def calculateChecksum(url: URL): Try[String] = {
-    val tmpFile = File.createTempFile(s"sbtix-${url.toString}", ".tmp")
-    val path = tmpFile.toPath
 
     try {
       val hash = MessageDigest getInstance "SHA-256"
-      val input = url.openConnection.getInputStream
-      val w = new FileOutputStream(tmpFile)
-
-      Stream.continually(input.read).takeWhile(_ != -1).foreach(w.write)
-
-      hash update (Files readAllBytes path)
-      input.close()
-
-      Files.delete(path)
-
+      val is = url.openConnection.getInputStream()
+      val input = IOUtils.readFully(is, -1, true)
+      is.close()
       Success {
-        hash.digest() map { "%02X" format _ } mkString
+        hash.digest(input) map { "%02X" format _ } mkString
       }
     } catch {
       case e: IOException =>
-        Files.delete(path)
         Failure(e)
     }
   }
