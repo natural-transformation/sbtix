@@ -23,4 +23,6 @@ publishArtifact in (Compile, packageSrc) := false
 
 unmanagedResourceDirectories in Compile += baseDirectory.value / "nix-exprs"
 
+scalafmtOnCompile := true
+
 libraryDependencies += "com.slamdata" %% "matryoshka-core" % "0.18.3"
