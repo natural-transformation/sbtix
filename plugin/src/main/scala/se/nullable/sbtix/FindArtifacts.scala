@@ -1,13 +1,11 @@
 package se.nullable.sbtix
 
-import java.io.{File, FileOutputStream, IOException}
+import java.io.{IOException}
 import java.net.URL
-import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.concurrent.Semaphore
 
 import sbt.Logger
-import sun.misc.IOUtils
 
 import scala.util.{Failure, Success, Try}
 
@@ -25,15 +23,23 @@ object FindArtifactsOfRepo {
   }
 
   private def calculateChecksum(url: URL): Try[String] = {
-
     try {
       val hash = MessageDigest getInstance "SHA-256"
       val is = url.openConnection.getInputStream()
-      val input = IOUtils.readFully(is, -1, true)
-      is.close()
-      Success {
-        hash.digest(input) map { "%02X" format _ } mkString
+      val buf = Array.ofDim[Byte](1048576)
+      try {
+        var readLen: Int = 0
+        do {
+          hash.update(buf, 0, readLen)
+          readLen = is.read(buf)
+        } while (readLen != -1)
+      } finally {
+        is.close()
       }
+      val stringHash = hash.digest().map("%02X".format(_)).mkString
+      // TODO: Replace with logger
+      // println(s"sbtix: hash of $url => $stringHash")
+      Success(stringHash)
     } catch {
       case e: IOException =>
         Failure(e)
