@@ -13,7 +13,9 @@ import scala.util.{Failure, Success, Try}
 object FindArtifactsOfRepo {
   private val semaphore = new Semaphore(4, false)
 
-  def fetchChecksum(originalUrl: String, artifactType: String, url: URL): Try[String] = {
+  def fetchChecksum(originalUrl: String,
+                    artifactType: String,
+                    url: URL): Try[String] = {
     semaphore.acquireUninterruptibly()
     val checksum = calculateChecksum(url)
     semaphore.release()
@@ -40,37 +42,49 @@ object FindArtifactsOfRepo {
       Success {
         hash.digest() map { "%02X" format _ } mkString
       }
-    } catch { case e: IOException =>
-      Files.delete(path)
-      Failure(e)
+    } catch {
+      case e: IOException =>
+        Files.delete(path)
+        Failure(e)
     }
   }
 }
 
 class FindArtifactsOfRepo(repoName: String, root: String) {
 
-  def findArtifacts(logger: Logger, modules: Set[GenericModule]): Set[NixArtifact] = modules.flatMap { ga =>
-    val rootUrl = new URL(root)
+  def findArtifacts(logger: Logger,
+                    modules: Set[GenericModule]): Set[NixArtifact] =
+    modules.flatMap { ga =>
+      val rootUrl = new URL(root)
 
-    val authedRootURI = ga.authed(rootUrl) //authenticated version of the rootUrl
+      val authedRootURI = ga.authed(rootUrl) //authenticated version of the rootUrl
 
-    val allArtifacts = recursiveListFiles(ga.localSearchLocation)
-    //get list of files at location
-    val targetArtifacts = allArtifacts.filter(f => """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.getName).isDefined) //filter for interesting files
+      val allArtifacts = recursiveListFiles(ga.localSearchLocation)
+      //get list of files at location
+      val targetArtifacts = allArtifacts.filter(
+        f =>
+          """.*(\.jar|\.pom|ivy.xml)$""".r
+            .findFirstIn(f.getName)
+            .isDefined) //filter for interesting files
 
-    targetArtifacts.map { artifactLocalFile =>
+      targetArtifacts.map { artifactLocalFile =>
+        val calcUrl = ga.calculateURI(artifactLocalFile).toURL
 
-      val calcUrl = ga.calculateURI(artifactLocalFile).toURL
-
-      NixArtifact(
-        repoName,
-        calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
-        calcUrl.toString,
-        FindArtifactsOfRepo.fetchChecksum(calcUrl.toString, "Artifact", artifactLocalFile.toURI.toURL).get)
+        NixArtifact(
+          repoName,
+          calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
+          calcUrl.toString,
+          FindArtifactsOfRepo
+            .fetchChecksum(calcUrl.toString,
+                           "Artifact",
+                           artifactLocalFile.toURI.toURL)
+            .get
+        )
+      }
     }
-  }
 
-  def findMetaArtifacts(logger: Logger, metaArtifacts: Set[MetaArtifact]): Set[NixArtifact] = {
+  def findMetaArtifacts(logger: Logger,
+                        metaArtifacts: Set[MetaArtifact]): Set[NixArtifact] = {
     metaArtifacts.map { meta =>
       NixArtifact(
         repoName,
@@ -82,4 +96,3 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
   }
 
 }
-

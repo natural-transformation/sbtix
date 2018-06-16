@@ -22,3 +22,5 @@ publishArtifact in (Compile, packageDoc) := false
 publishArtifact in (Compile, packageSrc) := false
 
 unmanagedResourceDirectories in Compile += baseDirectory.value / "nix-exprs"
+
+scalafmtOnCompile := true

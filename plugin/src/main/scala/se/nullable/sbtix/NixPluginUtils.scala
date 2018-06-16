@@ -13,7 +13,8 @@ package object sbtix {
     str.replace("\n", "\n" + spaces)
   }
 
-  def parentURI(uri: URI) = if (uri.getPath().endsWith("/")) uri.resolve("..") else uri.resolve(".")
+  def parentURI(uri: URI) =
+    if (uri.getPath().endsWith("/")) uri.resolve("..") else uri.resolve(".")
 
   def recursiveListFiles(f: File): Array[File] = {
     val these = f.listFiles
@@ -21,6 +22,8 @@ package object sbtix {
   }
 
   def resource2string(file: String): String = {
-    Source.fromInputStream(getClass.getResourceAsStream(file)).getLines mkString "\n"
+    Source
+      .fromInputStream(getClass.getResourceAsStream(file))
+      .getLines mkString "\n"
   }
 }

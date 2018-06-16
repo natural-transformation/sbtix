@@ -1,8 +1,9 @@
 package se.nullable.sbtix
 
 object CompositionWriter {
-  def apply(compositionType: String, buildName: String): String = stripWhitespace(
-    s"""
+  def apply(compositionType: String, buildName: String): String =
+    stripWhitespace(
+      s"""
        |# this file originates from SBTix
        |{ pkgs ? import <nixpkgs> {} }:
        |
@@ -21,7 +22,10 @@ object CompositionWriter {
        |    ];
        |  }
      """.stripMargin
-  )
+    )
 
-  private def stripWhitespace(t:String) = t.split("\n") map { (l:String) => l.replaceAll("^\\s+$", "") } mkString "\n"
+  private def stripWhitespace(t: String) =
+    t.split("\n") map { (l: String) =>
+      l.replaceAll("^\\s+$", "")
+    } mkString "\n"
 }
