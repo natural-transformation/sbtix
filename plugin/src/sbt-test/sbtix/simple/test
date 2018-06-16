@@ -5,5 +5,5 @@
 > genNix
 $ exists repo.nix
 $ exists project/repo.nix
-$ exec nix-build --show-trace
+$ exec nix-build --show-trace -j32
 $ exec result/bin/three

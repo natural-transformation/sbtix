@@ -4,6 +4,8 @@ if (sys.props.contains("plugin.version")) {
   Seq()
 }
 
-addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.0-M15-1")
+addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
 
-addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.1.4")
+import coursier.Keys._
+classpathTypes += "maven-plugin"
+addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.3.2")
