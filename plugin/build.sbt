@@ -4,6 +4,33 @@ name := "sbtix"
 organization := "se.nullable.sbtix"
 version := "0.2-SNAPSHOT"
 
+publishTo := Some(
+  if (isSnapshot.value) {
+    Opts.resolver.sonatypeSnapshots
+  } else {
+    Opts.resolver.sonatypeStaging
+  }
+)
+
+licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
+homepage := Some(url("https://gitlab.com/teozkr/Sbtix"))
+
+scmInfo := Some(
+  ScmInfo(
+    url("https://gitlab.com/teozkr/sbtix"),
+    "scm:git@gitlab.com:teozkr/sbtix.git"
+  )
+)
+
+developers := List(
+  Developer(
+    id = "teozkr",
+    name = "Teo Klestrup Röijezon",
+    email = "teo@nullable.se",
+    url = url("https://nullable.se")
+  )
+)
+
 addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
 
 scriptedLaunchOpts ++= Seq(
