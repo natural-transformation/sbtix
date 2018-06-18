@@ -31,6 +31,13 @@ developers := List(
   )
 )
 
+useGpg := true
+
+pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
+// Secret rings are no more, as of GPG 2.2
+// See https://github.com/sbt/sbt-pgp/issues/126
+pgpSecretRing := pgpPublicRing.value
+
 addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
 
 scriptedLaunchOpts ++= Seq(
