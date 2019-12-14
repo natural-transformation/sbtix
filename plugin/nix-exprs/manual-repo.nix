@@ -1,4 +1,4 @@
-# this file must still be generated manually.  
+# this file must still be generated manually.
 {
   "repos" = {
     "nix-public" = "";

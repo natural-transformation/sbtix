@@ -179,7 +179,7 @@
     };
     "nix-public/com/google/protobuf/protobuf-parent/3.3.1/" = {
       url = "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-parent/3.3.1/";
-      sha256 = "E2018BDD655B06F076F46B14A78C413338808970C5A4EB1920F4E4B41CE424CE";
+      sha256 = "B3B9EAB04046381AAF40620601612344D4683F9B163C8B5ED2250419CBF8AA22";
     };
     "nix-public/com/google/protobuf/protobuf-parent/3.3.1/protobuf-parent-3.3.1.pom" = {
       url = "https://repo1.maven.org/maven2/com/google/protobuf/protobuf-parent/3.3.1/protobuf-parent-3.3.1.pom";
