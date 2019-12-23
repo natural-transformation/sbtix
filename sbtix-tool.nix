@@ -87,7 +87,7 @@ let
 in
 stdenv.mkDerivation {
   name = "sbtix-${version}";
-  
+
   src = ./.;
 
   phases = [ "installPhase" ];
