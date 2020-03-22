@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+if [[ -z "${SBTIX:-}" ]]; then
+  SBTIX="$(nix-build)"
+fi
+
+cd plugin
+$SBTIX/bin/sbtix-gen-all
+
+# Not ideal. Turning them off in the build.sbt is possible, but not compatible
+# with plain sbt.
+#   generateComposition := false
+rm -f default.nix manual-repo.nix project/manual-repo.nix sbtix.nix
