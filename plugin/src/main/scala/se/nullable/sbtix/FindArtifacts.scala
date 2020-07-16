@@ -83,18 +83,17 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
   def findMetaArtifacts(logger: Logger,
                         metaArtifacts: Set[MetaArtifact]): Set[NixArtifact] = {
 
-      val targetMetaArtifacts = metaArtifacts.filter(f =>
-        """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.artifactUrl).isDefined)
+    val targetMetaArtifacts = metaArtifacts.filter(f =>
+      """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.artifactUrl).isDefined)
 
-      targetMetaArtifacts.map { meta =>
-        NixArtifact(
-          repoName = repoName,
-          relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
-          url = meta.artifactUrl,
-          sha256 = meta.checkSum
-        )
-      }
+    targetMetaArtifacts.map { meta =>
+      NixArtifact(
+        repoName = repoName,
+        relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
+        url = meta.artifactUrl,
+        sha256 = meta.checkSum
+      )
     }
-
+  }
 
 }
