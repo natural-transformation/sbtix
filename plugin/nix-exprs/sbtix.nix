@@ -1,5 +1,5 @@
 # This file originates from SBTix
-{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper }:
+{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk }:
 with stdenv.lib;
 
 let sbtTemplate = repoDefs: versioning:
@@ -172,7 +172,7 @@ in rec {
           mkdir -p $out/
           cp target/universal/stage/* $out/ -r
           for p in $(find $out/bin/* -executable); do
-            wrapProgram "$p" --prefix PATH : ${jre}/bin
+            wrapProgram "$p" --prefix PATH : ${jre}/bin --prefix PATH : ${gawk}/bin
           done
         '';
     } // args);
