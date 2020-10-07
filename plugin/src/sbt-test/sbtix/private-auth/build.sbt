@@ -1,9 +1,9 @@
-scalaVersion in ThisBuild := "2.11.8"
+scalaVersion in ThisBuild := "2.12.12"
 
 lazy val one = project.settings(
   coursierCredentials += "private demo" -> coursier.Credentials("test", "test"),
   libraryDependencies ++= Seq(
-    "com.typesafe.slick" %% "slick" % "3.1.1",
+    "com.typesafe.slick" %% "slick" % "3.3.3",
     "private-org" % "private-name" % "1.2.3"
   )
 )

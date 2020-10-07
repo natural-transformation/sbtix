@@ -1,7 +1,7 @@
-scalaVersion in ThisBuild := "2.11.8"
+scalaVersion in ThisBuild := "2.12.12"
 
 lazy val one = project.settings(
-  libraryDependencies += "com.typesafe.slick" %% "slick" % "3.1.1"
+  libraryDependencies += "com.typesafe.slick" %% "slick" % "3.3.3"
 )
 lazy val two = project
 lazy val three = project.dependsOn(one).enablePlugins(JavaAppPackaging)
