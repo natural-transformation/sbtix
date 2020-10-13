@@ -6,5 +6,9 @@ tests/**/repo.nix
 tests/*/repo.nix
 .ensime_cache
 .ensime
+.bloop
+.bsp
+.metals
+metals.sbt
 
 tests/template-generation/default.nix
