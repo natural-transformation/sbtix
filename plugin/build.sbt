@@ -39,6 +39,7 @@ pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
 pgpSecretRing := pgpPublicRing.value
 
 addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
+enablePlugins(SbtPlugin)
 
 scriptedLaunchOpts ++= Seq(
   s"-Dplugin.version=${version.value}"

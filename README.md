@@ -55,7 +55,7 @@ let
 in
     sbtix.buildSbtProgram {
         name = "sbtix-example";
-        src = ./.;
+        src = pkgs.lib.cleanSource ./.;
         repo = [ (import ./manual-repo.nix)
                  (import ./repo.nix)
                  (import ./project/repo.nix)

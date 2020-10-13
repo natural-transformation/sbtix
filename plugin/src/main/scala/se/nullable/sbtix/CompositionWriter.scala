@@ -5,7 +5,9 @@ object CompositionWriter {
     stripWhitespace(
       s"""
        |# this file originates from SBTix
-       |{ pkgs ? import <nixpkgs> {} }:
+       |{ pkgs ? import <nixpkgs> {}
+       |, cleanSource ? pkgs.lib.cleanSource
+       |}:
        |
        |with pkgs;
        |
