@@ -1833,6 +1833,22 @@
       url = "https://repo1.maven.org/maven2/org/scala-sbt/sbinary_2.12/0.5.1/sbinary_2.12-0.5.1.pom";
       sha256 = "A341EB17ADDEFBF08F8F4BC063442079230B930523177B0CD494002D645E2124";
     };
+    "nix-public/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0-javadoc.jar";
+      sha256 = "4CCE2C2B1CB8D5F58A79641275A569116BC58489674661127E8659A76DF3A991";
+    };
+    "nix-public/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0-sources.jar";
+      sha256 = "73FC9A1BDDFD1F29B10F9FC65F41C0A2D9D04C2D8CDF27168ED0A4EB1735FD9C";
+    };
+    "nix-public/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0.jar";
+      sha256 = "CBFA96AF0CEC3BC1E00DF1AD6C33DB98B254361A16C7251725F6890447A7B245";
+    };
+    "nix-public/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/sbt-launch/1.4.0/sbt-launch-1.4.0.pom";
+      sha256 = "383B72FBB409F11EEE98F35EBD9500F03534B611FCC2236465D06A697F36806A";
+    };
     "nix-public/org/scala-sbt/sbt/1.4.0/sbt-1.4.0-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/sbt/1.4.0/sbt-1.4.0-javadoc.jar";
       sha256 = "1A01A86587D15D675E29F3ADE689B167044D58A9A76BCF26C04E8B376ACB6CC8";
@@ -1864,6 +1880,38 @@
     "nix-public/org/scala-sbt/scripted-plugin_2.12/1.4.0/scripted-plugin_2.12-1.4.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-plugin_2.12/1.4.0/scripted-plugin_2.12-1.4.0.pom";
       sha256 = "30757281BE44484E7637EFEC725F32D2B42F4867B1387C03A343C71773BCD25C";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0-javadoc.jar";
+      sha256 = "B076EED91E43BE898813DC6F3E9668C2AC48009BA36099A640130889B1457065";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0-sources.jar";
+      sha256 = "96EF2D56F1F839AED419272AD20C261883B5660437F41A952F3A04195867BD0B";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0.jar";
+      sha256 = "3565F9FC396DAFC1E8E1166F8F96E2CDADDBE632F7E1A59728B44FF6A058BE06";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt-redux_2.12/1.4.0/scripted-sbt-redux_2.12-1.4.0.pom";
+      sha256 = "6060FBF6E0A7A5F447E7C369D827085B8BB67C5D9099362BD7D0AB357B549BF7";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0-javadoc.jar";
+      sha256 = "4D5A0236C5163E799A20B23BF2ED75437899191C0D8752D13DF5FB65BD5C8D53";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0-sources.jar";
+      sha256 = "C3950ED5D8D6D256189C0997349D5178811512F4B69FE955BB6731BB96A154F9";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0.jar";
+      sha256 = "A99812680CEBB45B42B8EB9EF04798B6368F19E7E274D0A70AF9D78D512E45CB";
+    };
+    "nix-public/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/scripted-sbt_2.12/1.4.0/scripted-sbt_2.12-1.4.0.pom";
+      sha256 = "F0540768C3E2F679E7D21A80338C5A472AA2C334EEF5CC75625C736B695C17B2";
     };
     "nix-public/org/scala-sbt/task-system_2.12/1.4.0/task-system_2.12-1.4.0-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/task-system_2.12/1.4.0/task-system_2.12-1.4.0-javadoc.jar";
@@ -2120,6 +2168,22 @@
     "nix-public/org/scala-sbt/util-relation_2.12/1.4.0/util-relation_2.12-1.4.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/util-relation_2.12/1.4.0/util-relation_2.12-1.4.0.pom";
       sha256 = "4B074BA1D9545DC3172456EA0BBB1CF60543284A3B12A9047A066ED9FBD3CDA3";
+    };
+    "nix-public/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0-javadoc.jar";
+      sha256 = "7F5DF5A4EF32A33C3453C18A1B906D398C3AC201146D9AB89DA4A111D79C31AE";
+    };
+    "nix-public/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0-sources.jar";
+      sha256 = "8C7CCA3A0110236B0FBBA466BE38362D8E5319419DF550AD163826D1DBFB3D4F";
+    };
+    "nix-public/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0.jar";
+      sha256 = "26AAD9C7182CF3B8199DAEBD729A5E380C3F6D808EF46E072EF2F7D737F308D5";
+    };
+    "nix-public/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/util-scripted_2.12/1.4.0/util-scripted_2.12-1.4.0.pom";
+      sha256 = "2B0CA2344F1B91C7D5B8340CA1A3010FBA28DB148CA04CFB871C1B2CF0DD9E28";
     };
     "nix-public/org/scala-sbt/util-tracking_2.12/1.4.0/util-tracking_2.12-1.4.0-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/util-tracking_2.12/1.4.0/util-tracking_2.12-1.4.0-javadoc.jar";
