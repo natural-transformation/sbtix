@@ -16,7 +16,7 @@ object CompositionWriter {
        |in
        |  sbtix.buildSbt${compositionType.capitalize} {
        |    name = "$buildName";
-       |    src = ./.;
+       |    src = cleanSource ./.;
        |    repo = [
        |      (import ./repo.nix)
        |      (import ./project/repo.nix)
