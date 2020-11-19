@@ -9,10 +9,8 @@ object CompositionWriter {
        |, cleanSource ? pkgs.lib.cleanSource
        |}:
        |
-       |with pkgs;
-       |
        |let
-       |  sbtix = callPackage ./sbtix.nix {};
+       |  sbtix = pkgs.callPackage ./sbtix.nix {};
        |in
        |  sbtix.buildSbt${compositionType.capitalize} {
        |    name = "$buildName";
