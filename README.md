@@ -19,7 +19,6 @@ Additionally, this means that Nix can do a better job of enforcing purity where 
 
 * Alpha quality, beware (and please report any issues!)
 * Nix file for SBT compiler interface dependencies must currently be created manually.
-* You must use the Coursier dependency resolver instead of Ivy (because SBT's Ivy resolver does not report the original artifact URLs)
 
 ## How?
 
