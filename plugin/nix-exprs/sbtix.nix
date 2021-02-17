@@ -94,11 +94,19 @@ in rec {
             parentDirs = filePath:
                 concatStringsSep "/" (init (splitString "/" filePath));
             linkArtifact = outputPath: urlAttrs:
+                let
+                  artifact = fetchurl urlAttrs;
+                in
                 [ ''mkdir -p "$out/${parentDirs outputPath}"''
-                  ''ln -fsn "${fetchurl urlAttrs}" "$out/${outputPath}"''
+                  ''ln -fsn "${artifact}" "$out/${outputPath}"''
+                  # TODO: include the executable bit as a suffix of the hash.
+                  #       Shouldn't matter in our use case though.
+                  ''ln -fsn "${artifact}" "$out/cas/${lib.toLower urlAttrs.sha256}"''
                 ];
         in
-            lib.concatStringsSep "\n" (lib.concatLists (lib.mapAttrsToList linkArtifact artifacts)));
+            ''
+              mkdir -p $out/cas
+            '' + lib.concatStringsSep "\n" (lib.concatLists (lib.mapAttrsToList linkArtifact artifacts)));
 
     repoConfig = {repos, nixrepo, name}:
         let
@@ -125,6 +133,18 @@ in rec {
           fetchedDependencies = [thisFetchedDependencies] ++ concatMap (d: d.fetchedRepos) sbtixBuildInputs;
           repoDefs = concatMap repoConfig fetchedDependencies;
 
+          # This takes a couple of seconds, but only needs to run when dependencies have changed.
+          # It's probably near-instantaneous if done in, say, python.
+          combinedCas = runCommand "${name}-cas" {} ''
+            mkdir -p $out/cas
+            ${lib.concatStringsSep "\n" (map (dep: ''
+                for casRef in ${dep.nixrepo}/cas/*; do
+                  ln -sf "$(readlink "$casRef")" $out/cas/$(basename "$casRef")
+                done
+              '') fetchedDependencies)
+            }
+          '';
+
           builtDependencies = concatMap (d: [ d ] ++ d.builtRepos) sbtixBuildInputs;
 
           sbtSetupTemplate = mergeSbtTemplates(map (sbtTemplate repoDefs) versionings);
@@ -141,6 +161,7 @@ in rec {
       in stdenv.mkDerivation (rec {
             dontPatchELF      = true;
             dontStrip         = true;
+            doDist            = true;
 
             # COURSIER_CACHE env variable is needed if one wants to use non-sbtix repositories in the below repo list, which is sometimes useful.
             COURSIER_CACHE = "./.coursier/cache/v1";
@@ -170,6 +191,28 @@ in rec {
 
               runHook postBuild
             '';
+
+            distPhase = ''
+              runHook preDist
+
+              echo 1>&2 "replacing copies by references..."
+              saved=0
+              while read file; do
+                hash="$(sha256sum "$file" | cut -c -64)"
+                entry="${combinedCas}/cas/$hash"
+                if [[ -e $entry ]]; then
+                  size="$(stat -c%s $file)"
+                  echo 1>&2 "replacing $file ($size bytes)"
+                  saved=$[saved+size]
+                  rm $file
+                  ln -s "$(readlink "$entry")" "$file"
+                fi
+              done < <(find $out -type f)
+              echo 1>&2 "saved $[saved/1000] kB"
+
+              runHook postDist
+            '';
+
         } // args // {
             repo = null;
             buildInputs = [ makeWrapper jdk sbt ] ++ buildInputs;
