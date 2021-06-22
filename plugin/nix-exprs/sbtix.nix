@@ -35,9 +35,9 @@ let
 
         # SBT Launcher Configuration
         # http://www.scala-sbt.org/0.13.5/docs/Launcher/Configuration.html
-        sbtixRepos = writeText "sbtixRepos" ''
+        sbtixRepos = writeText "sbt-setup-template-repos" ''
         [repositories]
-          ${concatStringsSep "\n  " repoDefs}
+        ${concatStringsSep "\n  " repoDefs}
         local
         '';
     in stdenv.mkDerivation (rec {
@@ -166,7 +166,7 @@ in rec {
 
           # SBT Launcher Configuration
           # http://www.scala-sbt.org/0.13.5/docs/Launcher/Configuration.html
-          sbtixRepos = writeText "sbtixRepos" ''
+          sbtixRepos = writeText "${name}-repos" ''
             [repositories]
               ${concatStringsSep "\n  " (map (d: "${d.name}: file://${d}, ${ivyRepoPattern}") builtDependencies)}
               ${concatStringsSep "\n  " repoDefs}
