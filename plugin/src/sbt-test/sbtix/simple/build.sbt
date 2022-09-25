@@ -1,4 +1,4 @@
-scalaVersion in ThisBuild := "2.12.12"
+scalaVersion in ThisBuild := "2.13.9"
 
 lazy val one = project.settings(
   libraryDependencies += "com.typesafe.slick" %% "slick" % "3.3.3"
