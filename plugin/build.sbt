@@ -2,7 +2,7 @@ sbtPlugin := true
 
 name := "sbtix"
 organization := "se.nullable.sbtix"
-version := "0.2-SNAPSHOT"
+version := "0.3-SNAPSHOT"
 
 publishTo := Some(
   if (isSnapshot.value) {
@@ -48,15 +48,15 @@ scriptedBufferLog := false
 
 publishMavenStyle := false
 
-publishArtifact in (Compile, packageBin) := true
+Compile / packageBin / publishArtifact := true
 
-publishArtifact in (Test, packageBin) := false
+Test / packageBin / publishArtifact := false
 
-publishArtifact in (Compile, packageDoc) := false
+Compile / packageDoc / publishArtifact := false
 
-publishArtifact in (Compile, packageSrc) := false
+Compile / packageSrc / publishArtifact := false
 
-unmanagedResourceDirectories in Compile += baseDirectory.value / "nix-exprs"
+Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 
 scalafmtOnCompile := true
 

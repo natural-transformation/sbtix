@@ -44,7 +44,7 @@ object NixPlugin extends AutoPlugin {
 
       val genProjectDataSet = (for {
         project <- extracted.structure.allProjectRefs
-        genProjectData <- Project.runTask(genNixProject in project, state) match {
+        genProjectData <- Project.runTask(project / genNixProject, state) match {
           case Some((_state, Value(taskOutput))) =>
             state = _state
             Some(taskOutput)

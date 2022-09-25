@@ -1,4 +1,4 @@
-scalaVersion in ThisBuild := "2.12.12"
+scalaVersion in ThisBuild := "2.13.9"
 
 lazy val one = project.settings(
   credentials += Credentials(realm = "Very secret stuff!", host = "files.nullable.se", userName = "test", passwd = "test"),
