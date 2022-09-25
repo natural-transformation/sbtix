@@ -1,8 +1,23 @@
 # This file originates from SBTix
 { runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk }:
-with stdenv.lib;
 
-let sbtTemplate = repoDefs: versioning:
+let
+    inherit (lib)
+      catAttrs
+      concatLists
+      concatMap
+      concatStringsSep
+      flatten
+      fold
+      init
+      mapAttrsToList
+      optionalString
+      splitString
+      toLower
+      unique
+      ;
+
+    sbtTemplate = repoDefs: versioning:
     let
         buildSbt = writeText "build.sbt" ''
           scalaVersion := "${versioning.scalaVersion}"
@@ -20,9 +35,9 @@ let sbtTemplate = repoDefs: versioning:
 
         # SBT Launcher Configuration
         # http://www.scala-sbt.org/0.13.5/docs/Launcher/Configuration.html
-        sbtixRepos = writeText "sbtixRepos" ''
+        sbtixRepos = writeText "sbt-setup-template-repos" ''
         [repositories]
-          ${concatStringsSep "\n  " repoDefs}
+        ${concatStringsSep "\n  " repoDefs}
         local
         '';
     in stdenv.mkDerivation (rec {
@@ -85,7 +100,7 @@ let sbtTemplate = repoDefs: versioning:
                   "chmod -R u+rw $out"
                 ];
         in
-            lib.concatStringsSep "\n" (["mkdir -p $out"] ++ lib.concatLists (map copyTemplate templates))
+            concatStringsSep "\n" (["mkdir -p $out"] ++ concatLists (map copyTemplate templates))
         );
 
 in rec {
@@ -101,12 +116,12 @@ in rec {
                   ''ln -fsn "${artifact}" "$out/${outputPath}"''
                   # TODO: include the executable bit as a suffix of the hash.
                   #       Shouldn't matter in our use case though.
-                  ''ln -fsn "${artifact}" "$out/cas/${lib.toLower urlAttrs.sha256}"''
+                  ''ln -fsn "${artifact}" "$out/cas/${toLower urlAttrs.sha256}"''
                 ];
         in
             ''
               mkdir -p $out/cas
-            '' + lib.concatStringsSep "\n" (lib.concatLists (lib.mapAttrsToList linkArtifact artifacts)));
+            '' + concatStringsSep "\n" (concatLists (mapAttrsToList linkArtifact artifacts)));
 
     repoConfig = {repos, nixrepo, name}:
         let
@@ -115,7 +130,7 @@ in rec {
             repoPath = repoName: repoPattern:
                 [ "${name}-${repoName}: file://${nixrepo}/${repoName}${repoPatternOptional repoPattern}" ];
         in
-            lib.concatLists (lib.mapAttrsToList repoPath repos);
+            concatLists (mapAttrsToList repoPath repos);
 
     ivyRepoPattern = "[organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]";
 
@@ -137,7 +152,7 @@ in rec {
           # It's probably near-instantaneous if done in, say, python.
           combinedCas = runCommand "${name}-cas" {} ''
             mkdir -p $out/cas
-            ${lib.concatStringsSep "\n" (map (dep: ''
+            ${concatStringsSep "\n" (map (dep: ''
                 for casRef in ${dep.nixrepo}/cas/*; do
                   ln -sf "$(readlink "$casRef")" $out/cas/$(basename "$casRef")
                 done
@@ -151,7 +166,7 @@ in rec {
 
           # SBT Launcher Configuration
           # http://www.scala-sbt.org/0.13.5/docs/Launcher/Configuration.html
-          sbtixRepos = writeText "sbtixRepos" ''
+          sbtixRepos = writeText "${name}-repos" ''
             [repositories]
               ${concatStringsSep "\n  " (map (d: "${d.name}: file://${d}, ${ivyRepoPattern}") builtDependencies)}
               ${concatStringsSep "\n  " repoDefs}

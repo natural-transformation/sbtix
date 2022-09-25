@@ -9,14 +9,12 @@ object CompositionWriter {
        |, cleanSource ? pkgs.lib.cleanSource
        |}:
        |
-       |with pkgs;
-       |
        |let
-       |  sbtix = callPackage ./sbtix.nix {};
+       |  sbtix = pkgs.callPackage ./sbtix.nix {};
        |in
        |  sbtix.buildSbt${compositionType.capitalize} {
        |    name = "$buildName";
-       |    src = ./.;
+       |    src = cleanSource ./.;
        |    repo = [
        |      (import ./repo.nix)
        |      (import ./project/repo.nix)

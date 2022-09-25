@@ -1,6 +1,6 @@
 { pkgs ? import <nixpkgs> {}
 , cleanSource ? src: pkgs.lib.cleanSourceWith { filter = path: type: baseNameOf path != "target"; inherit src; }
-}: with pkgs;
+}:
 let
     sbtix = pkgs.callPackage ./sbtix.nix {};
 in
