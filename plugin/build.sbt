@@ -60,7 +60,7 @@ Compile / packageSrc / publishArtifact := false
 
 Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 
-scalafmtOnCompile := true
+scalafmtOnCompile := false
 
 libraryDependencies += "org.scalaz" %% "scalaz-core" % "7.3.6"
 libraryDependencies += "com.slamdata" %% "matryoshka-core" % "0.18.3"

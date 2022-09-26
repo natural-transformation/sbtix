@@ -10,5 +10,5 @@ version := ver
 
 libraryDependencies += org %% "mb-two" % ver extra ("nix" -> "")
 
-addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.7.5")
+addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.9.4")
 enablePlugins(JavaAppPackaging)
