@@ -6,15 +6,23 @@ import java.net.{URI, URL}
 import sbt.ProjectRef
 import coursier._
 import coursier.core.Authentication
+import coursier.util._
+import coursier.cache.CachePolicy
+import coursier.cache.Cache
+import coursier.cache.CacheDefaults
+import coursier.cache.CacheLogger
+import coursier.cache.FileCache
+import coursier.util.EitherT
+import lmcoursier.internal.Resolvers
+import lmcoursier.FromSbt
+
 import sbt.{Logger, ModuleID, Resolver, PatternsBasedRepository}
 
-import scalaz.concurrent.Task
-import scalaz.{-\/, EitherT, \/-}
 import java.util.concurrent.ConcurrentSkipListSet
 
 import scala.collection.JavaConverters._
 import java.util.concurrent.ExecutorService
-
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
 import java.nio.file.{StandardCopyOption, Files => NioFiles}
@@ -24,12 +32,13 @@ import matryoshka._
 import matryoshka.data._
 import matryoshka.implicits._
 import se.nullable.sbtix.data.RoseTreeF
+import se.nullable.sbtix.utils.Conversions._
 
 case class GenericModule(primaryArtifact: Artifact,
                          dep: Dependency,
                          localFile: java.io.File) {
   private val isIvy = localFile.getParentFile().getName() == "jars"
-  private val moduleId = ToSbt.moduleId(dep, Map())
+
   val url = new URL(primaryArtifact.url)
 
   private val authedUri = authed(url)
@@ -49,13 +58,18 @@ case class GenericModule(primaryArtifact: Artifact,
   def authed(url: URL) = {
     primaryArtifact.authentication match {
       case Some(a) =>
-        new URI(url.getProtocol,
-                s"${a.user}:${a.password}",
-                url.getHost,
-                url.getPort,
-                url.getPath,
-                url.getQuery,
-                url.getRef)
+        a.passwordOpt match {
+          case Some(pwd) =>
+            new URI(url.getProtocol,
+                    s"${a.user}:${pwd}",
+                    url.getHost,
+                    url.getPort,
+                    url.getPath,
+                    url.getQuery,
+                    url.getRef)
+          case None => url.toURI
+        }
+
       case None => url.toURI
     }
   }
@@ -92,7 +106,7 @@ case class MetaArtifact(artifactUrl: String, checkSum: String)
     val name = gm.dep.module.name
     val version = gm.dep.version
 
-    val slashOrgans = organ.replace(".", "/")
+    val slashOrgans = organ.copy(value = organ.value.replace(".", "/"))
 
     val mvn = s"$slashOrgans/$name/$version"
     val ivy = s"$organ/$name/$version"
@@ -141,23 +155,35 @@ class CoursierArtifactFetcher(logger: Logger,
     * modification of coursier.Cache.Fetch()
     */
   def CacheFetch_WithCollector(
-      cache: File = Cache.default,
-      cachePolicy: CachePolicy = CachePolicy.FetchMissing,
-      checksums: Seq[Option[String]] = Cache.defaultChecksums,
-      logger: Option[Cache.Logger] = None,
-      pool: ExecutorService = Cache.defaultPool,
-      ttl: Option[Duration] = Cache.defaultTtl
-  ): Fetch.Content[Task] = { artifact =>
-    Cache
-      .file(
-        artifact,
-        cache,
-        cachePolicy,
-        checksums = checksums,
-        logger = logger,
-        pool = pool,
-        ttl = ttl
-      )
+      location: File = CacheDefaults.location,
+      cachePolicies: Seq[CachePolicy] = Seq(CachePolicy.FetchMissing),
+      checksums: Seq[Option[String]] = CacheDefaults.checksums,
+      logger: CacheLogger = CacheLogger.nop,
+      pool: ExecutorService = CacheDefaults.pool,
+      ttl: Option[Duration] = CacheDefaults.ttl
+  ): Cache.Fetch[Task] = { artifact =>
+    val fileCache = FileCache[Task](
+      location = location,
+      cachePolicies = cachePolicies,
+      checksums = checksums,
+      credentials = CacheDefaults.credentials,
+      logger = logger,
+      pool = pool,
+      ttl = ttl,
+      localArtifactsShouldBeCached = false,
+      followHttpToHttpsRedirections = true,
+      followHttpsToHttpRedirections = false,
+      maxRedirections = CacheDefaults.maxRedirections,
+      sslRetry = CacheDefaults.sslRetryCount,
+      sslSocketFactoryOpt = None,
+      hostnameVerifierOpt = None,
+      retry = CacheDefaults.defaultRetryCount,
+      bufferSize = CacheDefaults.bufferSize,
+      classLoaders = Nil
+    )
+
+    fileCache
+      .file(artifact)
       .leftMap(_.describe)
       .flatMap { f =>
         def notFound(f: File) = Left(s"${f.getCanonicalPath} not found")
@@ -229,7 +255,7 @@ class CoursierArtifactFetcher(logger: Logger,
             metaArtifactCollector.add(MetaArtifact(artifact.url, checkSum))
           }
         }
-        EitherT.fromEither(Task.now[Either[String, String]](res))
+        EitherT.fromEither(res)
       }
   }
 
@@ -238,9 +264,10 @@ class CoursierArtifactFetcher(logger: Logger,
     val (dependenciesArtifacts, errors) = getAllDependencies(modules)
     val genericModules = dependenciesArtifacts.flatMap {
       case ((dependency, artifact)) =>
-        val downloadedArtifact = Cache.file(artifact).run.unsafePerformSync
+        val downloadedArtifact =
+          FileCache[Task](location = CacheDefaults.location).file(artifact)
 
-        downloadedArtifact.toOption.map { localFile =>
+        downloadedArtifact.run.unsafeRun().toOption.map { localFile =>
           GenericModule(artifact, dependency, localFile)
         }
     }
@@ -251,17 +278,22 @@ class CoursierArtifactFetcher(logger: Logger,
     : (Set[(Dependency, Artifact)], ResolutionErrors) = {
 
     val repos = resolvers.flatMap { resolver =>
-      FromSbt.repository(resolver,
-                         ivyProps,
-                         logger,
-                         credentials.get(resolver.name).map(_.authentication))
+      Resolvers.repository(
+        resolver = resolver,
+        ivyProperties = ivyProps,
+        log = logger,
+        authentication =
+          credentials.get(resolver.name).map(_.authentication).map(convert),
+        classLoaders = Seq()
+      )
     }
-    val fetch = Fetch.from(repos.toSeq, CacheFetch_WithCollector())
+
+    val fetch = ResolutionProcess.fetch(repos.toSeq, CacheFetch_WithCollector())
 
     def go(modules: Set[Dependency])
       : (Set[(Dependency, Artifact)], ResolutionErrors) = {
-      val res = Resolution(modules)
-      val resolution = res.process.run(fetch, 100).unsafePerformSync
+      val res = Resolution(modules.toSeq)
+      val resolution = res.process.run(fetch, 100).unsafeRun()
       val missingDependencies = findMissingDependencies(modules, resolution)
       val resolvedMissingDependencies =
         missingDependencies.map(dep => go(Set(dep)))
@@ -384,7 +416,7 @@ class CoursierArtifactFetcher(logger: Logger,
     Map("ivy.home" -> new File(sys.props("user.home"), ".ivy2").toString) ++ sys.props
 }
 
-case class ResolutionErrors(errors: Seq[(Dependency, Seq[String])]) {
+case class ResolutionErrors(errors: Seq[(ModuleVersion, Seq[String])]) {
 
   def +(other: ResolutionErrors) = {
     ResolutionErrors(errors ++ other.errors)

@@ -1,8 +1,13 @@
 package se.nullable.sbtix
 
-import coursier.CoursierPlugin
+import coursier.sbtcoursier.CoursierPlugin
+import coursier.sbtcoursiershared.SbtCoursierShared
+import coursier.core.Dependency
+import lmcoursier.FromSbt
 import sbt.Keys._
 import sbt._
+
+import se.nullable.sbtix.utils.Conversions._
 
 object NixPlugin extends AutoPlugin {
 
@@ -21,18 +26,19 @@ object NixPlugin extends AutoPlugin {
         -- projectDependencies.value)
 
       val depends = modules
-        .flatMap(coursier.FromSbt
+        .flatMap(FromSbt
           .dependencies(_, scalaVersion.value, scalaBinaryVersion.value))
         .map(_._2)
         .filterNot {
           _.module.organization == "se.nullable.sbtix"
         } //ignore the sbtix dependency that gets added because of the global sbtix plugin
 
-      GenProjectData(scalaVersion.value,
-                     sbtVersion.value,
-                     depends,
-                     genNixResolvers,
-                     CoursierPlugin.autoImport.coursierCredentials.value.toSet)
+      GenProjectData(
+        scalaVersion.value,
+        sbtVersion.value,
+        depends.map(convert),
+        genNixResolvers,
+        SbtCoursierShared.autoImport.coursierCredentials.value.toSet)
     }
 
   import autoImport._
@@ -138,7 +144,7 @@ object NixPlugin extends AutoPlugin {
 
   case class GenProjectData(scalaVersion: String,
                             sbtVersion: String,
-                            dependencies: Set[coursier.Dependency],
+                            dependencies: Set[Dependency],
                             resolvers: Set[Resolver],
                             credentials: Set[(String, coursier.Credentials)])
 

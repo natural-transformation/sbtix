@@ -1,4 +1,4 @@
-scalaVersion in ThisBuild := "2.13.9"
+ThisBuild / scalaVersion := "2.13.9"
 
 lazy val one = project.settings(
   credentials += Credentials(realm = "Very secret stuff!", host = "files.nullable.se", userName = "test", passwd = "test"),
@@ -14,4 +14,4 @@ lazy val three = project.settings(
 
 lazy val root = project.in(file(".")).aggregate(one, two, three)
 
-resolvers in ThisBuild += "private demo" at "https://files.nullable.se/sbtix-demo-private/"
+ThisBuild / resolvers += "private demo" at "https://files.nullable.se/sbtix-demo-private/"
