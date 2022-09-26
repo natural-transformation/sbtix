@@ -21,9 +21,8 @@ package object sbtix {
     these ++ these.filter(_.isDirectory).flatMap(recursiveListFiles)
   }
 
-  def resource2string(file: String): String = {
+  def resource2string(file: String): String =
     Source
       .fromInputStream(getClass.getResourceAsStream(file))
       .getLines mkString "\n"
-  }
 }

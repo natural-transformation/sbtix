@@ -1,10 +1,4 @@
-
-addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
-
-addSbtPlugin("com.lucidchart" % "sbt-scalafmt" % "1.15")
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
+addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.1.2")
 
 resolvers += Resolver.typesafeIvyRepo("releases")
-
-// addSbtPlugin("se.nullable.sbtix" % "sbtix" % "0.2-SNAPSHOT")
-
-addSbtPlugin("com.jsuereth" % "sbt-pgp" % "1.1.1")

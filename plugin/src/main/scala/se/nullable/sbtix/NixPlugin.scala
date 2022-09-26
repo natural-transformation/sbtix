@@ -26,8 +26,10 @@ object NixPlugin extends AutoPlugin {
         -- projectDependencies.value)
 
       val depends = modules
-        .flatMap(FromSbt
-          .dependencies(_, scalaVersion.value, scalaBinaryVersion.value))
+        .flatMap(
+          FromSbt
+            .dependencies(_, scalaVersion.value, scalaBinaryVersion.value)
+        )
         .map(_._2)
         .filterNot {
           _.module.organization == "se.nullable.sbtix"
@@ -38,39 +40,38 @@ object NixPlugin extends AutoPlugin {
         sbtVersion.value,
         depends.map(convert),
         genNixResolvers,
-        SbtCoursierShared.autoImport.coursierCredentials.value.toSet)
+        SbtCoursierShared.autoImport.coursierCredentials.value.toSet
+      )
     }
 
   import autoImport._
   lazy val genNixCommand =
     Command.command("genNix") { initState =>
       val extracted = Project.extract(initState)
-      val repoFile = extracted.get(nixRepoFile)
-      var state = initState
+      val repoFile  = extracted.get(nixRepoFile)
+      var state     = initState
 
       val genProjectDataSet = (for {
         project <- extracted.structure.allProjectRefs
         genProjectData <- Project.runTask(project / genNixProject, state) match {
-          case Some((_state, Value(taskOutput))) =>
-            state = _state
-            Some(taskOutput)
-          case Some((_state, Inc(inc: Incomplete))) =>
-            state = _state
-            state.log.error(
-              s"genNixProject task did not complete $inc for project $project")
-            None
-          case None =>
-            state.log.warn(
-              s"NixPlugin not enabled for project $project, skipping...")
-            None
-        }
+                            case Some((_state, Value(taskOutput))) =>
+                              state = _state
+                              Some(taskOutput)
+                            case Some((_state, Inc(inc: Incomplete))) =>
+                              state = _state
+                              state.log.error(s"genNixProject task did not complete $inc for project $project")
+                              None
+                            case None =>
+                              state.log.warn(s"NixPlugin not enabled for project $project, skipping...")
+                              None
+                          }
       } yield genProjectData).toSet
 
       //val (dependencySeqSet, resolverSeqSeq,credentialsSeq) = genProjectDataSeq
 
       val dependencies = genProjectDataSet.flatMap(_.dependencies)
-      val resolvers = genProjectDataSet.flatMap(_.resolvers)
-      val credentials = Map(genProjectDataSet.flatMap(_.credentials).toSeq: _*)
+      val resolvers    = genProjectDataSet.flatMap(_.resolvers)
+      val credentials  = Map(genProjectDataSet.flatMap(_.credentials).toSeq: _*)
       val versioning =
         genProjectDataSet.map(x => (x.scalaVersion, x.sbtVersion))
 
@@ -97,13 +98,12 @@ object NixPlugin extends AutoPlugin {
 
   lazy val genCompositionCommand =
     Command.command("genComposition") { state =>
-      val proj = Project.extract(state)
+      val proj    = Project.extract(state)
       val cmpFile = proj.get(compositionFile)
-      val t = proj.get(compositionType)
+      val t       = proj.get(compositionType)
 
       if (t == "project") {
-        state.log.warn(
-          "Composition type `project` is internal and should be avoided!")
+        state.log.warn("Composition type `project` is internal and should be avoided!")
       }
 
       // generation behavior is optional.
@@ -129,30 +129,31 @@ object NixPlugin extends AutoPlugin {
   override def trigger: PluginTrigger = allRequirements
 
   override def projectSettings = Seq(
-    nixRepoFile := baseDirectory.value / "repo.nix",
-    manualRepoFile := baseDirectory.value / "manual-repo.nix",
-    compositionFile := baseDirectory.value / "default.nix",
+    nixRepoFile         := baseDirectory.value / "repo.nix",
+    manualRepoFile      := baseDirectory.value / "manual-repo.nix",
+    compositionFile     := baseDirectory.value / "default.nix",
     generateComposition := true,
-    compositionType := "program",
-    sbtix := baseDirectory.value / "sbtix.nix",
-    genNixProject := genNixProjectTask.value,
+    compositionType     := "program",
+    sbtix               := baseDirectory.value / "sbtix.nix",
+    genNixProject       := genNixProjectTask.value,
     commands ++= Seq(
       genNixCommand,
       genCompositionCommand
     )
   )
 
-  case class GenProjectData(scalaVersion: String,
-                            sbtVersion: String,
-                            dependencies: Set[Dependency],
-                            resolvers: Set[Resolver],
-                            credentials: Set[(String, coursier.Credentials)])
+  case class GenProjectData(
+    scalaVersion: String,
+    sbtVersion: String,
+    dependencies: Set[Dependency],
+    resolvers: Set[Resolver],
+    credentials: Set[(String, coursier.Credentials)]
+  )
 
   object autoImport {
     val nixRepoFile =
       settingKey[File]("the path to put the nix repo definition in")
-    val genNixProject = taskKey[GenProjectData](
-      "generate a Nix definition for building the maven repo")
+    val genNixProject  = taskKey[GenProjectData]("generate a Nix definition for building the maven repo")
     val manualRepoFile = settingKey[File]("path to `manual-repo.nix`")
 
     // parameters for composition file
@@ -160,9 +161,8 @@ object NixPlugin extends AutoPlugin {
       settingKey[File]("path to the file which contains the composition")
     val generateComposition =
       settingKey[Boolean]("Whether or not to generate a composition")
-    val compositionType = settingKey[String](
-      "project type to be built by SBTix (`program`, `library` or `project`)")
-    val sbtix = settingKey[File]("path for sbtix.nix file")
+    val compositionType = settingKey[String]("project type to be built by SBTix (`program`, `library` or `project`)")
+    val sbtix           = settingKey[File]("path for sbtix.nix file")
   }
 
 }
