@@ -4,13 +4,14 @@ name         := "sbtix"
 organization := "se.nullable.sbtix"
 version      := "0.3-SNAPSHOT"
 
-publishTo := Some(
-  if (isSnapshot.value) {
-    Opts.resolver.sonatypeSnapshots
-  } else {
-    Opts.resolver.sonatypeStaging
+publishTo := {
+    if (isSnapshot.value) {
+      Opts.resolver.sonatypeOssSnapshots.headOption
+    } else {
+      Some(Opts.resolver.sonatypeStaging)
+    }
   }
-)
+
 
 licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
 homepage := Some(url("https://gitlab.com/teozkr/Sbtix"))
@@ -31,15 +32,10 @@ developers := List(
   )
 )
 
-useGpg := true
-
 pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
 // Secret rings are no more, as of GPG 2.2
 // See https://github.com/sbt/sbt-pgp/issues/126
 pgpSecretRing := pgpPublicRing.value
-
-addSbtPlugin("io.get-coursier" % "sbt-coursier"               % "2.0.11-1")
-addSbtPlugin("io.get-coursier" % "sbt-coursier-shared-shaded" % "2.0.4")
 
 enablePlugins(SbtPlugin)
 
@@ -62,7 +58,11 @@ Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 
 scalafmtOnCompile := false
 
-libraryDependencies += "org.scalaz"   %% "scalaz-core"     % "7.3.6"
-libraryDependencies += "com.slamdata" %% "matryoshka-core" % "0.18.3"
+libraryDependencies ++= Seq(
+  "io.get-coursier" %% "coursier" % "2.0.16",
+  "org.scalaz"   %% "scalaz-core"     % "7.3.6",
+  "com.slamdata" %% "matryoshka-core" % "0.18.3"
+)
+
 // TODO Replace matryoshka with droste
 // libraryDependencies += "io.higherkindness" %% "droste-core" % "0.9.0"

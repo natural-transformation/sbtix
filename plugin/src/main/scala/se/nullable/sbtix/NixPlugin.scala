@@ -1,12 +1,12 @@
 package se.nullable.sbtix
 
-import coursier.sbtcoursier.CoursierPlugin
-import coursier.sbtcoursiershared.SbtCoursierShared
+// import coursier.sbtcoursier.CoursierPlugin
+// import coursier.sbtcoursiershared.SbtCoursierShared
 import coursier.core.Dependency
 import lmcoursier.FromSbt
 import sbt.Keys._
 import sbt._
-
+// import sbt.librarymanagement.ivy.Credentials
 import se.nullable.sbtix.utils.Conversions._
 
 object NixPlugin extends AutoPlugin {
@@ -40,7 +40,7 @@ object NixPlugin extends AutoPlugin {
         sbtVersion.value,
         depends.map(convert),
         genNixResolvers,
-        SbtCoursierShared.autoImport.coursierCredentials.value.toSet
+        // SbtCoursierShared.autoImport.coursierCredentials.value.toSet
       )
     }
 
@@ -71,12 +71,12 @@ object NixPlugin extends AutoPlugin {
 
       val dependencies = genProjectDataSet.flatMap(_.dependencies)
       val resolvers    = genProjectDataSet.flatMap(_.resolvers)
-      val credentials  = Map(genProjectDataSet.flatMap(_.credentials).toSeq: _*)
+      // val credentials  = Map(genProjectDataSet.flatMap(_.credentials).toSeq: _*)
       val versioning =
         genProjectDataSet.map(x => (x.scalaVersion, x.sbtVersion))
 
       val fetcher =
-        new CoursierArtifactFetcher(state.log, resolvers, credentials)
+        new CoursierArtifactFetcher(state.log, resolvers) // credentials
       val (repos, artifacts, errors) = fetcher(dependencies)
 
       val flatErrors = errors.flatMap(_.errors)
@@ -124,7 +124,7 @@ object NixPlugin extends AutoPlugin {
       state
     }
 
-  override def requires: Plugins = CoursierPlugin
+  // override def requires: Plugins = CoursierPlugin
 
   override def trigger: PluginTrigger = allRequirements
 
@@ -147,7 +147,7 @@ object NixPlugin extends AutoPlugin {
     sbtVersion: String,
     dependencies: Set[Dependency],
     resolvers: Set[Resolver],
-    credentials: Set[(String, coursier.Credentials)]
+    // credentials: Set[(String, Credentials)]
   )
 
   object autoImport {

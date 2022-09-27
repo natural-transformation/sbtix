@@ -37,6 +37,7 @@ let
 
     #the global plugins directory must be writeable
     SBTIX_GLBASE_DIR="$HOME/.sbtix"
+    echo "Using SBTIX_GLBASE_DIR $SBTIX_GLBASE_DIR"
 
     # if the directory doesn't exist then create it
     if ! [ -d "$SBTIX_GLBASE_DIR" ]; then

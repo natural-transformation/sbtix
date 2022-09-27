@@ -33,6 +33,7 @@ import matryoshka.data._
 import matryoshka.implicits._
 import se.nullable.sbtix.data.RoseTreeF
 import se.nullable.sbtix.utils.Conversions._
+// import sbt.librarymanagement.ivy.Credentials
 
 case class GenericModule(primaryArtifact: Artifact, dep: Dependency, localFile: java.io.File) {
   private val isIvy = localFile.getParentFile().getName() == "jars"
@@ -112,7 +113,11 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
   }
 }
 
-class CoursierArtifactFetcher(logger: Logger, resolvers: Set[Resolver], credentials: Map[String, Credentials]) {
+class CoursierArtifactFetcher(
+  logger: Logger, 
+  resolvers: Set[Resolver], 
+  // credentials: Map[String, Credentials]
+  ) {
 
   // Collects pom.xml and ivy.xml urls from Coursier internals
   val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
@@ -268,12 +273,13 @@ class CoursierArtifactFetcher(logger: Logger, resolvers: Set[Resolver], credenti
 
   private def getAllDependencies(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
 
+    //TODO support authentication 
     val repos = resolvers.flatMap { resolver =>
       Resolvers.repository(
         resolver = resolver,
         ivyProperties = ivyProps,
         log = logger,
-        authentication = credentials.get(resolver.name).map(_.authentication).map(convert),
+        authentication = None,//credentials.get(resolver.name).map(_.authentication).map(convert),
         classLoaders = Seq()
       )
     }
