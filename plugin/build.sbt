@@ -1,8 +1,8 @@
 sbtPlugin := true
 
-name := "sbtix"
+name         := "sbtix"
 organization := "se.nullable.sbtix"
-version := "0.3-SNAPSHOT"
+version      := "0.3-SNAPSHOT"
 
 publishTo := Some(
   if (isSnapshot.value) {
@@ -38,7 +38,7 @@ pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
 // See https://github.com/sbt/sbt-pgp/issues/126
 pgpSecretRing := pgpPublicRing.value
 
-addSbtPlugin("io.get-coursier" % "sbt-coursier" % "2.0.11-1")
+addSbtPlugin("io.get-coursier" % "sbt-coursier"               % "2.0.11-1")
 addSbtPlugin("io.get-coursier" % "sbt-coursier-shared-shaded" % "2.0.4")
 
 enablePlugins(SbtPlugin)
@@ -62,7 +62,7 @@ Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 
 scalafmtOnCompile := false
 
-libraryDependencies += "org.scalaz" %% "scalaz-core" % "7.3.6"
+libraryDependencies += "org.scalaz"   %% "scalaz-core"     % "7.3.6"
 libraryDependencies += "com.slamdata" %% "matryoshka-core" % "0.18.3"
 // TODO Replace matryoshka with droste
 // libraryDependencies += "io.higherkindness" %% "droste-core" % "0.9.0"
