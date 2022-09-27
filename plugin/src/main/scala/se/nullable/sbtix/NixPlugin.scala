@@ -32,7 +32,7 @@ object NixPlugin extends AutoPlugin {
         )
         .map(_._2)
         .filterNot {
-          _.module.organization == "se.nullable.sbtix"
+          _.module.organization.value == "se.nullable.sbtix"
         } //ignore the sbtix dependency that gets added because of the global sbtix plugin
 
       GenProjectData(
