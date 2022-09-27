@@ -23,15 +23,6 @@ scmInfo := Some(
   )
 )
 
-developers := List(
-  Developer(
-    id = "teozkr",
-    name = "Teo Klestrup Röijezon",
-    email = "teo@nullable.se",
-    url = url("https://nullable.se")
-  )
-)
-
 pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
 // Secret rings are no more, as of GPG 2.2
 // See https://github.com/sbt/sbt-pgp/issues/126
