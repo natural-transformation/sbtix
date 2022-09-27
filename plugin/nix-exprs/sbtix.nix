@@ -1,6 +1,6 @@
 # This file originates from SBTix
-{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk }:
-
+{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk, git }:
+# TODO remove git or make it an user option 
 let
     inherit (lib)
       catAttrs
@@ -179,7 +179,7 @@ in rec {
             doDist            = true;
 
             # COURSIER_CACHE env variable is needed if one wants to use non-sbtix repositories in the below repo list, which is sometimes useful.
-            COURSIER_CACHE = "./.coursier/cache/v1";
+            COURSIER_CACHE = "~/.cache/coursier/v1"; #"./.coursier/cache/v1";
 
             # configurePhase = ''
             #   cp -Lr ${sbtSetupTemplate}/ivy ./.ivy2
@@ -230,7 +230,8 @@ in rec {
 
         } // args // {
             repo = null;
-            buildInputs = [ makeWrapper jdk sbt ] ++ buildInputs;
+            buildInputs = [ makeWrapper jdk sbt git ] ++ buildInputs;
+            # TODO remove git or make it an user option 
         }) // {
             builtRepos = builtDependencies;
             fetchedRepos = fetchedDependencies;
