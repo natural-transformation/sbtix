@@ -1,6 +1,6 @@
 # This file originates from SBTix
-{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk }:
-
+{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk, git }:
+# TODO remove git or make it an user option 
 let
     inherit (lib)
       catAttrs
@@ -230,7 +230,8 @@ in rec {
 
         } // args // {
             repo = null;
-            buildInputs = [ makeWrapper jdk sbt ] ++ buildInputs;
+            buildInputs = [ makeWrapper jdk sbt git ] ++ buildInputs;
+            # TODO remove git or make it an user option 
         }) // {
             builtRepos = builtDependencies;
             fetchedRepos = fetchedDependencies;
