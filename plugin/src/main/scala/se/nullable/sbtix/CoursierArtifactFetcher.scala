@@ -275,13 +275,22 @@ class CoursierArtifactFetcher(
 
     //TODO support authentication 
     val repos = resolvers.flatMap { resolver =>
-      Resolvers.repository(
+      val repo: Option[Any] = Resolvers.repository(
         resolver = resolver,
         ivyProperties = ivyProps,
         log = logger,
         authentication = None,//credentials.get(resolver.name).map(_.authentication).map(convert),
         classLoaders = Seq()
       )
+      repo.map {
+        case coreRepo: Repository =>
+          coreRepo
+        case otherRepo =>
+          // From the signature on `Resolvers.repository` you would expect this to be dead code,
+          // but depending on the classpath `repository` may return a shaded Repository object
+          // that needs to be converted:
+          convertRepository(otherRepo)
+      }
     }
 
     val fetch = ResolutionProcess.fetch(repos.toSeq, CacheFetch_WithCollector())
