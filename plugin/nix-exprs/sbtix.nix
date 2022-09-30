@@ -69,7 +69,7 @@ let
               runHook postUnpack
             '';
 
-            buildInputs = [ jdk sbt ];
+            buildInputs = [ jdk sbt git ];
 
             buildPhase = ''
               runHook preBuild
