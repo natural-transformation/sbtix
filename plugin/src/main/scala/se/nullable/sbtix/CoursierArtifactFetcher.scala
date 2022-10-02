@@ -27,11 +27,6 @@ import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
 import java.nio.file.{StandardCopyOption, Files => NioFiles}
 
-import matryoshka.Coalgebra
-import matryoshka._
-import matryoshka.data._
-import matryoshka.implicits._
-import se.nullable.sbtix.data.RoseTreeF
 import se.nullable.sbtix.utils.Conversions._
 // import sbt.librarymanagement.ivy.Credentials
 
@@ -328,86 +323,24 @@ class CoursierArtifactFetcher(
       }
     }
 
-  type F[X] = RoseTreeF[Dependency, X]
-  type G[X] = RoseTreeF[Either[Dependency, Dependency], X]
-
   private def findMissingDependencies(module: Dependency, resolution: Resolution): Set[Dependency] = {
 
-    def getDeps(withReconciledVersions: Boolean): Coalgebra[F, (Int, Dependency)] = {
-      case (0, dep) =>
-        RoseTreeF(dep, List.empty)
-      case (n, dep) =>
-        RoseTreeF(
-          dep,
-          resolution
-            .dependenciesOf(dep, withReconciledVersions)
-            .toList
-            .map(d => (n - 1, d))
-        )
+    def getDeps(dep: Dependency, withReconciledVersions: Boolean, maxDepth: Int): Set[Dependency] = {
+      if (maxDepth == 0)
+        Set(dep)
+      else
+        resolution
+          .dependenciesOf(dep, withReconciledVersions)
+          .flatMap(getDeps(_, withReconciledVersions, maxDepth - 1))
+          .toSet + dep
     }
 
     // Get the dependency tree where versions where reconciled by coursier
-    val reconciled = (100, module).ana[Fix[F]](getDeps(true))
-    // Get the dependency tree with the raw ,non reconciled, versions
-    val raw = (100, module).ana[Fix[F]](getDeps(false))
-    // Diff the two dependency trees to find what was rejected by coursier
-    val treeDiff = diffDependencyTrees(raw, reconciled)
+    val reconciled: Set[Dependency] = getDeps(module, true, 100)
+    // Get the dependency tree with the raw, non-reconciled, versions
+    val raw: Set[Dependency] = getDeps(module, false, 100)
 
-    val possiblyMissingDependencies = treeDiff.cata[Set[Dependency]] {
-      case RoseTreeF(Right(_), children)  => children.toSet.flatten
-      case RoseTreeF(Left(dep), children) => children.toSet.flatten + dep
-    }
-    val missingDependencies =
-      possiblyMissingDependencies.diff(resolution.dependencies)
-    missingDependencies
-  }
-
-  private def diffDependencyTrees(raw: Fix[F], reconciled: Fix[F]): Fix[G] = {
-    val coalgebra: Coalgebra[G, Either[Fix[F], (Fix[F], Fix[F])]] = {
-      case Right((raw, reconciled)) =>
-        val rawMap = raw.unFix.children.map { t =>
-          t.unFix.value -> t.unFix.children
-        }.toMap
-        val recMap = reconciled.unFix.children.map { t =>
-          t.unFix.value -> t.unFix.children
-        }.toMap
-        val diff: List[Either[Fix[F], (Fix[F], Fix[F])]] =
-          rawMap.keySet
-            .diff(recMap.keySet)
-            .map { dep =>
-              val x: Either[Fix[F], (Fix[F], Fix[F])] =
-                Left(Fix[F](RoseTreeF(dep, rawMap(dep))))
-              x
-            }
-            .toList
-        val intersection: List[Either[Fix[F], (Fix[F], Fix[F])]] =
-          rawMap.keySet
-            .intersect(recMap.keySet)
-            .map { dep =>
-              val x: Either[Fix[F], (Fix[F], Fix[F])] =
-                Right((Fix[F](RoseTreeF(dep, rawMap(dep))), Fix[F](RoseTreeF(dep, recMap(dep)))))
-              x
-            }
-            .toList
-        RoseTreeF(Right(raw.unFix.value), diff ++ intersection)
-      case Left(raw) =>
-        RoseTreeF(Left(raw.unFix.value), raw.unFix.children.map((g: Fix[F]) => Left(g)))
-    }
-
-    val algebra: Algebra[G, Fix[G]] = {
-      case RoseTreeF(d @ Left(dep), children) =>
-        Fix[G](RoseTreeF(d, children))
-      case RoseTreeF(Right(dep), children) =>
-        val newChildren = children.filter(_.unFix.value.isLeft)
-        if (newChildren.isEmpty) {
-          Fix[G](RoseTreeF(Right(dep), newChildren))
-        } else {
-          Fix[G](RoseTreeF(Left(dep), newChildren))
-        }
-    }
-
-    val x: Either[Fix[F], (Fix[F], Fix[F])] = Right((raw, reconciled))
-    x.hylo[G, Fix[G]](algebra, coalgebra)
+    (reconciled ++ raw).diff(resolution.dependencies)
   }
 
   private def ivyProps =

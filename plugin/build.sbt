@@ -51,9 +51,4 @@ scalafmtOnCompile := false
 
 libraryDependencies ++= Seq(
   "io.get-coursier" %% "coursier" % "2.0.16",
-  "org.scalaz"   %% "scalaz-core"     % "7.3.6",
-  "com.slamdata" %% "matryoshka-core" % "0.18.3"
 )
-
-// TODO Replace matryoshka with droste
-// libraryDependencies += "io.higherkindness" %% "droste-core" % "0.9.0"
