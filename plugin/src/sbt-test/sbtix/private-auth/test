@@ -1,1 +1,11 @@
-$ exec echo "ignoring private-auth test"
+> compile
+> genNix
+> genComposition
+> reload plugins
+> genNix
+$ exists repo.nix
+$ exists project/repo.nix
+$ must-mirror repo.nix expected/repo.nix
+$ must-mirror project/repo.nix expected/project-repo.nix
+$ exec nix-build --show-trace -j32
+$ exec result/bin/three
