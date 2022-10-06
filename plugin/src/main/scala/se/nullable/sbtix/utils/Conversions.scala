@@ -77,11 +77,11 @@ object Conversions {
   private def convertPattern(pattern: Any): coursier.ivy.Pattern = {
     def convertChunk(chunk: Any): coursier.ivy.Pattern.Chunk = {
       if (chunk.getClass.getName.endsWith("Var"))
-        coursier.ivy.Pattern.Chunk.Var(chunk.asInstanceOf[{ val string: String }].string)
+        coursier.ivy.Pattern.Chunk.Var(chunk.asInstanceOf[{ val name: String }].name)
       else if (chunk.getClass.getName.endsWith("Opt"))
         coursier.ivy.Pattern.Chunk.Opt(chunk.asInstanceOf[{ val content: Seq[Any] }].content.map(convertChunk))
       else if (chunk.getClass.getName.endsWith("Const"))
-        coursier.ivy.Pattern.Chunk.Const(chunk.asInstanceOf[{ val string: String }].string)
+        coursier.ivy.Pattern.Chunk.Const(chunk.asInstanceOf[{ val value: String }].value)
       else
         throw new IllegalArgumentException(s"Could not convert chunk $chunk of type ${chunk.getClass.getName}")
     }

@@ -200,6 +200,10 @@
       url = "https://repo1.maven.org/maven2/org/scala-sbt/compiler-bridge_2.13/1.7.1/compiler-bridge_2.13-1.7.1-sources.jar";
       sha256 = "36113AA52D9834B98F9A7D79A86409A3DD08C4B7DE66D5836D9D25127159068E";
     };
+    "nix-public/org/scala-sbt/compiler-bridge_2.13/1.7.1/compiler-bridge_2.13-1.7.1.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/compiler-bridge_2.13/1.7.1/compiler-bridge_2.13-1.7.1.jar";
+      sha256 = "6F50CBA2630FC39F1FB3EFA186DF81076D31110719DA2337938915D88C7B4C65";
+    };
     "nix-public/org/scala-sbt/compiler-bridge_2.13/1.7.1/compiler-bridge_2.13-1.7.1.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/compiler-bridge_2.13/1.7.1/compiler-bridge_2.13-1.7.1.pom";
       sha256 = "A1DF8099B4CE298B43362658838332B6E289287E3611F375E4D135D9659AC150";
