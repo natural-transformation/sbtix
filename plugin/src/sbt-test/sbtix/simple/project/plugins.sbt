@@ -4,4 +4,8 @@ if (sys.props.contains("plugin.version")) {
   Seq()
 }
 
-addSbtPlugin("com.typesafe.sbt" % "sbt-native-packager" % "1.3.2")
+addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.9.4")
+
+// Not actually needed/used, but here to test sbtix correctly fetches
+// plugins that are not on Maven Central and only on sbt-plugin-releases:
+addSbtPlugin("net.bzzt" % "sbt-reproducible-builds" % "0.25")

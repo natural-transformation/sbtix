@@ -1,6 +1,6 @@
 { callPackage, writeText, writeScriptBin, stdenv, sbt }:
 let
-  version = "0.2";
+  version = "0.3";
   versionSnapshotSuffix = "-SNAPSHOT";
 
   sbtix = callPackage ./plugin/nix-exprs/sbtix.nix {};

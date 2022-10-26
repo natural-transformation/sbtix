@@ -1,6 +1,6 @@
 # Sbtix
 
-[![Build Status](https://travis-ci.org/teozkr/Sbtix.svg?branch=master)](https://travis-ci.org/teozkr/Sbtix)
+[![Build Status](https://github.com/github/docs/actions/workflows/main.yml/badge.svg?branch=master)](https://hercules-ci.com/github/natural-transformation/sbtix)
 
 ## What?
 
@@ -97,6 +97,12 @@ but makes them available to Ivy/Coursier.
 In order to use a private repository, add your credentials to `coursierCredentials`. Note that the key should be the name of the repository, see
 `plugin/src/sbt-test/sbtix/private-auth/build.sbt` for an example! Also, you must currently set the credentials for each SBT subproject, `in ThisBuild`
 doesn't currently work. This is for consistency with Coursier-SBT.
+
+*Security note*: the repository username and password will be
+embedded in the `repo.nix`, and part of your nix store. Having
+secrets in your nix store is a security risk, so make sure you
+have everything in place to make sure these secrets remain
+secret.
 
 ### FAQ
 

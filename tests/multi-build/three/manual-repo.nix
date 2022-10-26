@@ -5,15 +5,6 @@
     "nix-typesafe-ivy-releases" = "[organisation]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]";
   };
   "artifacts" = {
-    # dependencies so sbt can build the sbt-compiler-interface (http://www.scala-sbt.org/0.13/docs/Compiler-Interface.html)
-    "nix-public/org/scala-lang/jline/2.10.6/jline-2.10.6.pom" = {
-      url = "https://repo1.maven.org/maven2/org/scala-lang/jline/2.10.6/jline-2.10.6.pom";
-      sha256 = "16mg4b2c1m6gcq901wy6f6jpy8spw2yh909gi826xykq89ja94dg";
-    };
-    "nix-public/org/scala-lang/jline/2.10.6/jline-2.10.6.jar" = {
-      url = "https://repo1.maven.org/maven2/org/scala-lang/jline/2.10.6/jline-2.10.6.jar";
-      sha256 = "1cfk6whncx2g87grwdfmz6f76bn807saqik91iwcfv099b1jngw1";
-    };
     "nix-public/jline/jline/2.12.1/jline-2.12.1.pom" = {
       url = "https://repo1.maven.org/maven2/jline/jline/2.12.1/jline-2.12.1.pom";
       sha256 = "0pzjaccy3svy4arrzs02c2yif7plbwlr39kvs38qr68ij0v20m0j";
@@ -34,9 +25,9 @@
       url = "https://repo1.maven.org/maven2/org/sonatype/oss/oss-parent/7/oss-parent-7.pom";
       sha256 = "0m4lallnlhyfj3z24ispxzwvsxzaznhw6zsmk4j74sibr5kqh7xm";
     };
-    "nix-typesafe-ivy-releases/org.scala-sbt/compiler-interface/0.13.15/srcs/compiler-interface-sources.jar" = {
-      url = "https://repo.typesafe.com/typesafe/ivy-releases/org.scala-sbt/compiler-interface/0.13.15/srcs/compiler-interface-sources.jar";
-      sha256 = "1b2p8c8sypvi9hfbbbzv59sqpjssyx91m43s9vwxc5sa2fn5lk5g";
+    "nix-typesafe-ivy-releases/org.scala-sbt/compiler-interface/1.7.1/srcs/compiler-interface-sources.jar" = {
+      url = "https://repo.maven.apache.org/maven2/org/scala-sbt/compiler-interface/1.7.1/compiler-interface-1.7.1-sources.jar";
+      sha256 = "qtW0Qswbr+7jKK4I+eBlapH0qbzTRdKNZP22qSdHRBk=";
     };
   };
 }

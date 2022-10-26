@@ -1,16 +1,17 @@
 sbtPlugin := true
 
-name := "sbtix"
+name         := "sbtix"
 organization := "se.nullable.sbtix"
-version := "0.2-SNAPSHOT"
+version      := "0.3-SNAPSHOT"
 
-publishTo := Some(
-  if (isSnapshot.value) {
-    Opts.resolver.sonatypeSnapshots
-  } else {
-    Opts.resolver.sonatypeStaging
+publishTo := {
+    if (isSnapshot.value) {
+      Opts.resolver.sonatypeOssSnapshots.headOption
+    } else {
+      Some(Opts.resolver.sonatypeStaging)
+    }
   }
-)
+
 
 licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
 homepage := Some(url("https://gitlab.com/teozkr/Sbtix"))
@@ -22,23 +23,11 @@ scmInfo := Some(
   )
 )
 
-developers := List(
-  Developer(
-    id = "teozkr",
-    name = "Teo Klestrup Röijezon",
-    email = "teo@nullable.se",
-    url = url("https://nullable.se")
-  )
-)
-
-useGpg := true
-
 pgpPublicRing := Path.userHome / ".gnupg" / "pubring.kbx"
 // Secret rings are no more, as of GPG 2.2
 // See https://github.com/sbt/sbt-pgp/issues/126
 pgpSecretRing := pgpPublicRing.value
 
-addSbtPlugin("io.get-coursier" % "sbt-coursier" % "1.0.3")
 enablePlugins(SbtPlugin)
 
 scriptedLaunchOpts ++= Seq(
@@ -48,16 +37,18 @@ scriptedBufferLog := false
 
 publishMavenStyle := false
 
-publishArtifact in (Compile, packageBin) := true
+Compile / packageBin / publishArtifact := true
 
-publishArtifact in (Test, packageBin) := false
+Test / packageBin / publishArtifact := false
 
-publishArtifact in (Compile, packageDoc) := false
+Compile / packageDoc / publishArtifact := false
 
-publishArtifact in (Compile, packageSrc) := false
+Compile / packageSrc / publishArtifact := false
 
-unmanagedResourceDirectories in Compile += baseDirectory.value / "nix-exprs"
+Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 
-scalafmtOnCompile := true
+scalafmtOnCompile := false
 
-libraryDependencies += "com.slamdata" %% "matryoshka-core" % "0.18.3"
+libraryDependencies ++= Seq(
+  "io.get-coursier" %% "coursier" % "2.0.16",
+)

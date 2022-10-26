@@ -2,41 +2,39 @@ package se.nullable.sbtix
 
 import java.io.File
 import java.net.{URI, URL}
-
-import sbt.ProjectRef
-import coursier._
+import sbt.{uri, Credentials, Logger, ModuleID, PatternsBasedRepository, ProjectRef, Resolver}
+import coursier.*
 import coursier.core.Authentication
-import sbt.{Logger, ModuleID, Resolver, PatternsBasedRepository}
+import coursier.util.*
+import coursier.cache.CachePolicy
+import coursier.cache.Cache
+import coursier.cache.CacheDefaults
+import coursier.cache.CacheLogger
+import coursier.cache.FileCache
+import coursier.util.EitherT
+import lmcoursier.internal.Resolvers
+import lmcoursier.FromSbt
 
-import scalaz.concurrent.Task
-import scalaz.{-\/, EitherT, \/-}
 import java.util.concurrent.ConcurrentSkipListSet
-
-import scala.collection.JavaConverters._
+import scala.collection.JavaConverters.*
 import java.util.concurrent.ExecutorService
-
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
-import java.nio.file.{StandardCopyOption, Files => NioFiles}
+import java.nio.file.{StandardCopyOption, Files as NioFiles}
+import se.nullable.sbtix.data.RoseTree
+import se.nullable.sbtix.utils.Conversions.*
 
-import matryoshka.Coalgebra
-import matryoshka._
-import matryoshka.data._
-import matryoshka.implicits._
-import se.nullable.sbtix.data.RoseTreeF
-
-case class GenericModule(primaryArtifact: Artifact,
-                         dep: Dependency,
-                         localFile: java.io.File) {
+case class GenericModule(primaryArtifact: Artifact, dep: Dependency, localFile: java.io.File) {
   private val isIvy = localFile.getParentFile().getName() == "jars"
-  private val moduleId = ToSbt.moduleId(dep, Map())
+
   val url = new URL(primaryArtifact.url)
 
   private val authedUri = authed(url)
 
   /**
-    * remote location of the module and all related artifacts
-    */
+   * remote location of the module and all related artifacts
+   */
   private val calculatedParentURI = if (isIvy) {
     parentURI(parentURI(authedUri))
   } else {
@@ -44,36 +42,42 @@ case class GenericModule(primaryArtifact: Artifact,
   }
 
   /**
-    * create the authenticated version of a given url
-    */
-  def authed(url: URL) = {
+   * create the authenticated version of a given url
+   */
+  def authed(url: URL) =
     primaryArtifact.authentication match {
       case Some(a) =>
-        new URI(url.getProtocol,
-                s"${a.user}:${a.password}",
-                url.getHost,
-                url.getPort,
-                url.getPath,
-                url.getQuery,
-                url.getRef)
+        a.passwordOpt match {
+          case Some(pwd) =>
+            new URI(
+              url.getProtocol,
+              s"${a.user}:${pwd}",
+              url.getHost,
+              url.getPort,
+              url.getPath,
+              url.getQuery,
+              url.getRef
+            )
+          case None => url.toURI
+        }
+
       case None => url.toURI
     }
-  }
 
   /**
-    * resolve the URI of a sibling artifact, based on the primary artifact's parent URI
-    */
+   * resolve the URI of a sibling artifact, based on the primary artifact's
+   * parent URI
+   */
   def calculateURI(f: File) =
     if (isIvy) {
-      calculatedParentURI.resolve(
-        f.getParentFile().getName() + "/" + f.getName())
+      calculatedParentURI.resolve(f.getParentFile().getName() + "/" + f.getName())
     } else {
       calculatedParentURI.resolve(f.getName())
     }
 
   /**
-    * local location of the module and all related artifacts
-    */
+   * local location of the module and all related artifacts
+   */
   val localSearchLocation = if (isIvy) {
     localFile.getParentFile().getParentFile()
   } else {
@@ -81,18 +85,16 @@ case class GenericModule(primaryArtifact: Artifact,
   }
 }
 
-case class MetaArtifact(artifactUrl: String, checkSum: String)
-    extends Comparable[MetaArtifact] {
-  override def compareTo(other: MetaArtifact): Int = {
+case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparable[MetaArtifact] {
+  override def compareTo(other: MetaArtifact): Int =
     return artifactUrl.compareTo(other.artifactUrl)
-  }
 
   def matchesGenericModule(gm: GenericModule) = {
-    val organ = gm.dep.module.organization
-    val name = gm.dep.module.name
+    val organ   = gm.dep.module.organization
+    val name    = gm.dep.module.name
     val version = gm.dep.version
 
-    val slashOrgans = organ.replace(".", "/")
+    val slashOrgans = organ.copy(value = organ.value.replace(".", "/"))
 
     val mvn = s"$slashOrgans/$name/$version"
     val ivy = s"$organ/$name/$version"
@@ -101,15 +103,16 @@ case class MetaArtifact(artifactUrl: String, checkSum: String)
   }
 }
 
-class CoursierArtifactFetcher(logger: Logger,
-                              resolvers: Set[Resolver],
-                              credentials: Map[String, Credentials]) {
+class CoursierArtifactFetcher(
+  logger: Logger, 
+  resolvers: Set[Resolver], 
+  credentials: Set[Credentials]
+  ) {
 
   // Collects pom.xml and ivy.xml urls from Coursier internals
   val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
 
-  def apply(depends: Set[Dependency])
-    : (Set[NixRepo], Set[NixArtifact], Set[ResolutionErrors]) = {
+  def apply(depends: Set[Dependency]): (Set[NixRepo], Set[NixArtifact], Set[ResolutionErrors]) = {
     val (mods, errors) = buildNixProject(depends)
 
     //remove metaArtifacts that we already have a module for. We do not need to look them up twice.
@@ -138,26 +141,38 @@ class CoursierArtifactFetcher(logger: Logger,
   }
 
   /**
-    * modification of coursier.Cache.Fetch()
-    */
+   * modification of coursier.Cache.Fetch()
+   */
   def CacheFetch_WithCollector(
-      cache: File = Cache.default,
-      cachePolicy: CachePolicy = CachePolicy.FetchMissing,
-      checksums: Seq[Option[String]] = Cache.defaultChecksums,
-      logger: Option[Cache.Logger] = None,
-      pool: ExecutorService = Cache.defaultPool,
-      ttl: Option[Duration] = Cache.defaultTtl
-  ): Fetch.Content[Task] = { artifact =>
-    Cache
-      .file(
-        artifact,
-        cache,
-        cachePolicy,
-        checksums = checksums,
-        logger = logger,
-        pool = pool,
-        ttl = ttl
-      )
+    location: File = CacheDefaults.location,
+    cachePolicies: Seq[CachePolicy] = Seq(CachePolicy.FetchMissing),
+    checksums: Seq[Option[String]] = CacheDefaults.checksums,
+    logger: CacheLogger = CacheLogger.nop,
+    pool: ExecutorService = CacheDefaults.pool,
+    ttl: Option[Duration] = CacheDefaults.ttl
+  ): Cache.Fetch[Task] = { artifact =>
+    val fileCache = FileCache[Task](
+      location = location,
+      cachePolicies = cachePolicies,
+      checksums = checksums,
+      credentials = CacheDefaults.credentials,
+      logger = logger,
+      pool = pool,
+      ttl = ttl,
+      localArtifactsShouldBeCached = false,
+      followHttpToHttpsRedirections = true,
+      followHttpsToHttpRedirections = false,
+      maxRedirections = CacheDefaults.maxRedirections,
+      sslRetry = CacheDefaults.sslRetryCount,
+      sslSocketFactoryOpt = None,
+      hostnameVerifierOpt = None,
+      retry = CacheDefaults.defaultRetryCount,
+      bufferSize = CacheDefaults.bufferSize,
+      classLoaders = Nil
+    )
+
+    fileCache
+      .file(artifact)
       .leftMap(_.describe)
       .flatMap { f =>
         def notFound(f: File) = Left(s"${f.getCanonicalPath} not found")
@@ -165,11 +180,11 @@ class CoursierArtifactFetcher(logger: Logger,
         def read(f: File) =
           try Right(
             new String(NioFiles.readAllBytes(f.toPath), "UTF-8")
-              .stripPrefix("\ufeff"))
+              .stripPrefix("\ufeff")
+          )
           catch {
             case NonFatal(e) =>
-              Left(
-                s"Could not read (file:${f.getCanonicalPath}): ${e.getMessage}")
+              Left(s"Could not read (file:${f.getCanonicalPath}): ${e.getMessage}")
           }
 
         val res = if (f.exists()) {
@@ -226,42 +241,76 @@ class CoursierArtifactFetcher(logger: Logger,
             val checkSum = FindArtifactsOfRepo
               .fetchChecksum(artifact.url, "-Meta- Artifact", f.toURI().toURL())
               .get // TODO this might be expressed in a monad
-            metaArtifactCollector.add(MetaArtifact(artifact.url, checkSum))
+            val authedUrl =
+              artifact.authentication match {
+                case Some(auth) if auth.passwordOpt.isDefined =>
+                  val parts = artifact.url.split("://")
+                  require(parts.size == 2, s"URL should be splittable: ${artifact.url}")
+                  parts(0) + "://" + auth.user + ":" + auth.passwordOpt.get + "@" + parts(1)
+                case _ => artifact.url
+              }
+            metaArtifactCollector.add(MetaArtifact(authedUrl, checkSum))
           }
         }
-        EitherT.fromEither(Task.now[Either[String, String]](res))
+        EitherT.fromEither(res)
       }
   }
 
-  private def buildNixProject(
-      modules: Set[Dependency]): (Set[GenericModule], ResolutionErrors) = {
+  private def buildNixProject(modules: Set[Dependency]): (Set[GenericModule], ResolutionErrors) = {
     val (dependenciesArtifacts, errors) = getAllDependencies(modules)
-    val genericModules = dependenciesArtifacts.flatMap {
-      case ((dependency, artifact)) =>
-        val downloadedArtifact = Cache.file(artifact).run.unsafePerformSync
+    val genericModules = dependenciesArtifacts.flatMap { case ((dependency, artifact)) =>
+      val downloadedArtifact =
+        FileCache[Task](location = CacheDefaults.location).file(artifact)
 
-        downloadedArtifact.toOption.map { localFile =>
-          GenericModule(artifact, dependency, localFile)
-        }
+      downloadedArtifact.run.unsafeRun().toOption.map { localFile =>
+        GenericModule(artifact, dependency, localFile)
+      }
     }
     (genericModules, errors)
   }
 
-  private def getAllDependencies(modules: Set[Dependency])
-    : (Set[(Dependency, Artifact)], ResolutionErrors) = {
+  private def getAllDependencies(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
 
-    val repos = resolvers.flatMap { resolver =>
-      FromSbt.repository(resolver,
-                         ivyProps,
-                         logger,
-                         credentials.get(resolver.name).map(_.authentication))
+    val repos = resolvers.flatMap { resolver: Resolver =>
+      val repo: Option[Any] = Resolvers.repository(
+        resolver = resolver,
+        ivyProperties = ivyProps,
+        log = logger,
+        authentication = resolver match {
+          case mvn: sbt.MavenRepo =>
+            Credentials.forHost(credentials.toSeq, sbt.url(mvn.root).getHost).map(credentials =>
+              Authentication(credentials.userName, credentials.passwd, true, Some(credentials.realm), false, false)
+            )
+          case ivy: PatternsBasedRepository => {
+            val pat = ivy.patterns.artifactPatterns.head
+            val endIndex = pat.indexOf("[")
+            val root = pat.substring(0, endIndex)
+            Credentials.forHost(credentials.toSeq, uri(root).getHost).map(credentials =>
+              Authentication(credentials.userName, credentials.passwd, true, Some(credentials.realm), false, false)
+            )
+          }
+          case other =>
+            throw new IllegalStateException(s"How to do credentials for $other?")
+            None
+        },
+        classLoaders = Seq()
+      )
+      repo.map {
+        case coreRepo: Repository =>
+          coreRepo
+        case otherRepo =>
+          // From the signature on `Resolvers.repository` you would expect this to be dead code,
+          // but depending on the classpath `repository` may return a shaded Repository object
+          // that needs to be converted:
+          convertRepository(otherRepo)
+      }
     }
-    val fetch = Fetch.from(repos.toSeq, CacheFetch_WithCollector())
 
-    def go(modules: Set[Dependency])
-      : (Set[(Dependency, Artifact)], ResolutionErrors) = {
-      val res = Resolution(modules)
-      val resolution = res.process.run(fetch, 100).unsafePerformSync
+    val fetch = ResolutionProcess.fetch(repos.toSeq, CacheFetch_WithCollector())
+
+    def go(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
+      val res                 = Resolution(modules.toSeq)
+      val resolution          = res.process.run(fetch, 100).unsafeRun()
       val missingDependencies = findMissingDependencies(modules, resolution)
       val resolvedMissingDependencies =
         missingDependencies.map(dep => go(Set(dep)))
@@ -272,20 +321,18 @@ class CoursierArtifactFetcher(logger: Logger,
         .union(
           resolution
             .dependencyClassifiersArtifacts(Seq("tests", "sources", "javadoc"))
-            .toSet)
+            .toSet
+        )
         .union(resolvedMissingDependencies.flatMap(_._1))
-      val errors = resolvedMissingDependencies.foldRight(
-        ResolutionErrors(resolution.errors))((resolved, acc) =>
-        acc + resolved._2)
+      val errors =
+        resolvedMissingDependencies.foldRight(ResolutionErrors(resolution.errors))((resolved, acc) => acc + resolved._2)
       (artifacts, errors)
     }
 
     go(modules)
   }
 
-  private def findMissingDependencies(
-      dependencies: Set[Dependency],
-      resolution: Resolution): Set[Dependency] = {
+  private def findMissingDependencies(dependencies: Set[Dependency], resolution: Resolution): Set[Dependency] =
     dependencies.flatMap { dep =>
       if (resolution.dependencies.contains(dep)) {
         findMissingDependencies(dep, resolution)
@@ -293,105 +340,58 @@ class CoursierArtifactFetcher(logger: Logger,
         Set(dep)
       }
     }
-  }
 
-  type F[X] = RoseTreeF[Dependency, X]
-  type G[X] = RoseTreeF[Either[Dependency, Dependency], X]
+  private def findMissingDependencies(module: Dependency, resolution: Resolution): Set[Dependency] = {
 
-  private def findMissingDependencies(
-      module: Dependency,
-      resolution: Resolution): Set[Dependency] = {
-
-    def getDeps(
-        withReconciledVersions: Boolean): Coalgebra[F, (Int, Dependency)] = {
-      case (0, dep) =>
-        RoseTreeF(dep, List.empty)
-      case (n, dep) =>
-        RoseTreeF(dep,
-                  resolution
-                    .dependenciesOf(dep, withReconciledVersions)
-                    .toList
-                    .map(d => (n - 1, d)))
+    def getDeps(dep: Dependency, withReconciledVersions: Boolean, maxDepth: Int): RoseTree[Dependency] = {
+      if (maxDepth == 0)
+        RoseTree(dep, List.empty)
+      else
+        RoseTree(
+          dep,
+          resolution
+            .dependenciesOf(dep, withReconciledVersions)
+            .toList
+            .map(child => getDeps(child, withReconciledVersions, maxDepth - 1))
+        )
     }
 
     // Get the dependency tree where versions where reconciled by coursier
-    val reconciled = (100, module).ana[Fix[F]](getDeps(true))
+    val reconciled = getDeps(module, true, 100)
     // Get the dependency tree with the raw ,non reconciled, versions
-    val raw = (100, module).ana[Fix[F]](getDeps(false))
-    // Diff the two dependency trees to find what was rejected by coursier
-    val treeDiff = diffDependencyTrees(raw, reconciled)
+    val raw = getDeps(module, false, 100)
 
-    val possiblyMissingDependencies = treeDiff.cata[Set[Dependency]] {
-      case RoseTreeF(Right(_), children)  => children.toSet.flatten
-      case RoseTreeF(Left(dep), children) => children.toSet.flatten + dep
-    }
-    val missingDependencies =
-      possiblyMissingDependencies.diff(resolution.dependencies)
-    missingDependencies
+    // Diff the two dependency trees to find what was rejected by coursier
+    val possiblyMissingDependencies = diffDependencyTrees(raw, reconciled)
+    possiblyMissingDependencies.diff(resolution.dependencies)
   }
 
-  private def diffDependencyTrees(raw: Fix[F], reconciled: Fix[F]): Fix[G] = {
-    val coalgebra: Coalgebra[G, Either[Fix[F], (Fix[F], Fix[F])]] = {
-      case Right((raw, reconciled)) =>
-        val rawMap = raw.unFix.children.map { t =>
-          t.unFix.value -> t.unFix.children
+  private def diffDependencyTrees(raw: RoseTree[Dependency], reconciled: RoseTree[Dependency]): Set[Dependency] = {
+        val rawMap = raw.children.map { t =>
+          t.value -> t
         }.toMap
-        val recMap = reconciled.unFix.children.map { t =>
-          t.unFix.value -> t.unFix.children
+        val recMap = reconciled.children.map { t =>
+          t.value -> t
         }.toMap
-        val diff: List[Either[Fix[F], (Fix[F], Fix[F])]] =
+        val diff: Set[Dependency] =
           rawMap.keySet
             .diff(recMap.keySet)
-            .map { dep =>
-              val x: Either[Fix[F], (Fix[F], Fix[F])] =
-                Left(Fix[F](RoseTreeF(dep, rawMap(dep))))
-              x
-            }
-            .toList
-        val intersection: List[Either[Fix[F], (Fix[F], Fix[F])]] =
+        val intersection: Set[Dependency] =
           rawMap.keySet
             .intersect(recMap.keySet)
-            .map { dep =>
-              val x: Either[Fix[F], (Fix[F], Fix[F])] = Right(
-                (Fix[F](RoseTreeF(dep, rawMap(dep))),
-                 Fix[F](RoseTreeF(dep, recMap(dep)))))
-              x
-            }
-            .toList
-        RoseTreeF(Right(raw.unFix.value), diff ++ intersection)
-      case Left(raw) =>
-        RoseTreeF(Left(raw.unFix.value),
-                  raw.unFix.children.map((g: Fix[F]) => Left(g)))
-    }
-
-    val algebra: Algebra[G, Fix[G]] = {
-      case RoseTreeF(d @ Left(dep), children) =>
-        Fix[G](RoseTreeF(d, children))
-      case RoseTreeF(Right(dep), children) =>
-        val newChildren = children.filter(_.unFix.value.isLeft)
-        if (newChildren.isEmpty) {
-          Fix[G](RoseTreeF(Right(dep), newChildren))
-        } else {
-          Fix[G](RoseTreeF(Left(dep), newChildren))
-        }
-    }
-
-    val x: Either[Fix[F], (Fix[F], Fix[F])] = Right((raw, reconciled))
-    x.hylo[G, Fix[G]](algebra, coalgebra)
+        diff ++ intersection.flatMap(dep => diffDependencyTrees(rawMap(dep), recMap(dep)))
   }
 
   private def ivyProps =
     Map("ivy.home" -> new File(sys.props("user.home"), ".ivy2").toString) ++ sys.props
 }
 
-case class ResolutionErrors(errors: Seq[(Dependency, Seq[String])]) {
+case class ResolutionErrors(errors: Seq[(ModuleVersion, Seq[String])]) {
 
-  def +(other: ResolutionErrors) = {
+  def +(other: ResolutionErrors) =
     ResolutionErrors(errors ++ other.errors)
-  }
 
-  def +(other: Seq[ResolutionErrors]) = {
+  def +(other: Seq[ResolutionErrors]) =
     ResolutionErrors(errors ++ other.flatMap(_.errors))
-  }
 
 }

@@ -10,5 +10,6 @@ tests/*/repo.nix
 .bsp
 .metals
 metals.sbt
+.vscode
 
 tests/template-generation/default.nix
