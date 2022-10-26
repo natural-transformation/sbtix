@@ -1,6 +1,6 @@
 # Sbtix
 
-//TODO udpate
+<!-- TODO update -->
 [![Build Status](https://travis-ci.org/teozkr/Sbtix.svg?branch=master)](https://travis-ci.org/teozkr/Sbtix)
 
 ## What?
