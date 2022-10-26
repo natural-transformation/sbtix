@@ -24,7 +24,6 @@ import scala.util.control.NonFatal
 import java.nio.file.{StandardCopyOption, Files as NioFiles}
 import se.nullable.sbtix.data.RoseTree
 import se.nullable.sbtix.utils.Conversions.*
-// import sbt.librarymanagement.ivy.Credentials
 
 case class GenericModule(primaryArtifact: Artifact, dep: Dependency, localFile: java.io.File) {
   private val isIvy = localFile.getParentFile().getName() == "jars"
