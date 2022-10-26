@@ -1,12 +1,9 @@
 package se.nullable.sbtix
 
-// import coursier.sbtcoursier.CoursierPlugin
-// import coursier.sbtcoursiershared.SbtCoursierShared
 import coursier.core.Dependency
 import lmcoursier.FromSbt
 import sbt.Keys._
 import sbt._
-// import sbt.librarymanagement.ivy.Credentials
 import se.nullable.sbtix.utils.Conversions._
 
 object NixPlugin extends AutoPlugin {
@@ -67,8 +64,6 @@ object NixPlugin extends AutoPlugin {
                           }
       } yield genProjectData).toSet
 
-      //val (dependencySeqSet, resolverSeqSeq,credentialsSeq) = genProjectDataSeq
-
       val dependencies = genProjectDataSet.flatMap(_.dependencies)
       val resolvers    = genProjectDataSet.flatMap(_.resolvers)
       val credentials  = genProjectDataSet.flatMap(_.credentials)
@@ -123,8 +118,6 @@ object NixPlugin extends AutoPlugin {
 
       state
     }
-
-  // override def requires: Plugins = CoursierPlugin
 
   override def trigger: PluginTrigger = allRequirements
 
