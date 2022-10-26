@@ -2,11 +2,10 @@ package se.nullable.sbtix
 
 import java.io.File
 import java.net.{URI, URL}
-
-import sbt.ProjectRef
-import coursier._
+import sbt.{uri, Credentials, Logger, ModuleID, PatternsBasedRepository, ProjectRef, Resolver}
+import coursier.*
 import coursier.core.Authentication
-import coursier.util._
+import coursier.util.*
 import coursier.cache.CachePolicy
 import coursier.cache.Cache
 import coursier.cache.CacheDefaults
@@ -16,19 +15,15 @@ import coursier.util.EitherT
 import lmcoursier.internal.Resolvers
 import lmcoursier.FromSbt
 
-import sbt.{Logger, ModuleID, Resolver, PatternsBasedRepository}
-
 import java.util.concurrent.ConcurrentSkipListSet
-
-import scala.collection.JavaConverters._
+import scala.collection.JavaConverters.*
 import java.util.concurrent.ExecutorService
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
-import java.nio.file.{StandardCopyOption, Files => NioFiles}
-
+import java.nio.file.{StandardCopyOption, Files as NioFiles}
 import se.nullable.sbtix.data.RoseTree
-import se.nullable.sbtix.utils.Conversions._
+import se.nullable.sbtix.utils.Conversions.*
 // import sbt.librarymanagement.ivy.Credentials
 
 case class GenericModule(primaryArtifact: Artifact, dep: Dependency, localFile: java.io.File) {
@@ -112,7 +107,7 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
 class CoursierArtifactFetcher(
   logger: Logger, 
   resolvers: Set[Resolver], 
-  // credentials: Map[String, Credentials]
+  credentials: Set[Credentials]
   ) {
 
   // Collects pom.xml and ivy.xml urls from Coursier internals
@@ -247,7 +242,15 @@ class CoursierArtifactFetcher(
             val checkSum = FindArtifactsOfRepo
               .fetchChecksum(artifact.url, "-Meta- Artifact", f.toURI().toURL())
               .get // TODO this might be expressed in a monad
-            metaArtifactCollector.add(MetaArtifact(artifact.url, checkSum))
+            val authedUrl =
+              artifact.authentication match {
+                case Some(auth) if auth.passwordOpt.isDefined =>
+                  val parts = artifact.url.split("://")
+                  require(parts.size == 2, s"URL should be splittable: ${artifact.url}")
+                  parts(0) + "://" + auth.user + ":" + auth.passwordOpt.get + "@" + parts(1)
+                case _ => artifact.url
+              }
+            metaArtifactCollector.add(MetaArtifact(authedUrl, checkSum))
           }
         }
         EitherT.fromEither(res)
@@ -269,13 +272,28 @@ class CoursierArtifactFetcher(
 
   private def getAllDependencies(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
 
-    //TODO support authentication 
-    val repos = resolvers.flatMap { resolver =>
+    val repos = resolvers.flatMap { resolver: Resolver =>
       val repo: Option[Any] = Resolvers.repository(
         resolver = resolver,
         ivyProperties = ivyProps,
         log = logger,
-        authentication = None,//credentials.get(resolver.name).map(_.authentication).map(convert),
+        authentication = resolver match {
+          case mvn: sbt.MavenRepo =>
+            Credentials.forHost(credentials.toSeq, sbt.url(mvn.root).getHost).map(credentials =>
+              Authentication(credentials.userName, credentials.passwd, true, Some(credentials.realm), false, false)
+            )
+          case ivy: PatternsBasedRepository => {
+            val pat = ivy.patterns.artifactPatterns.head
+            val endIndex = pat.indexOf("[")
+            val root = pat.substring(0, endIndex)
+            Credentials.forHost(credentials.toSeq, uri(root).getHost).map(credentials =>
+              Authentication(credentials.userName, credentials.passwd, true, Some(credentials.realm), false, false)
+            )
+          }
+          case other =>
+            throw new IllegalStateException(s"How to do credentials for $other?")
+            None
+        },
         classLoaders = Seq()
       )
       repo.map {

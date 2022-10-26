@@ -99,6 +99,12 @@ In order to use a private repository, add your credentials to `coursierCredentia
 `plugin/src/sbt-test/sbtix/private-auth/build.sbt` for an example! Also, you must currently set the credentials for each SBT subproject, `in ThisBuild`
 doesn't currently work. This is for consistency with Coursier-SBT.
 
+*Security note*: the repository username and password will be
+embedded in the `repo.nix`, and part of your nix store. Having
+secrets in your nix store is a security risk, so make sure you
+have everything in place to make sure these secrets remain
+secret.
+
 ### FAQ
 
 Q: Why I am getting errors trying to generate `repo.nix` files when using the PlayFramework?

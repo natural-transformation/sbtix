@@ -1,9 +1,0 @@
-> compile
-> genNix
-> genComposition
-> reload plugins
-> genNix
-$ exists repo.nix
-$ exists project/repo.nix
-$ exec nix-build --show-trace -j32
-$ exec result/bin/three
