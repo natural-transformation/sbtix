@@ -1,7 +1,6 @@
 # Sbtix
 
-<!-- TODO update -->
-[![Build Status](https://travis-ci.org/teozkr/Sbtix.svg?branch=master)](https://travis-ci.org/teozkr/Sbtix)
+[![Build Status](https://github.com/github/docs/actions/workflows/main.yml/badge.svg?branch=master)](https://hercules-ci.com/github/natural-transformation/sbtix)
 
 ## What?
 
