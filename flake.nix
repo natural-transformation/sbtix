@@ -27,6 +27,8 @@
           nativeBuildInputs = [
             pkgs.sbt
           ];
+          # TODO: Don't rely on NIX_PATH in tests.
+          NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
         };
       };
       flake = {
