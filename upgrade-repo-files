@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# Like update-repo-files, but uses upstream master instead of building a new sbtix first.
+
+export SBTIX="$(nix build github:natural-transformation/sbtix --print-out-paths)"
+exec ./update-repo-files
