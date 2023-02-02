@@ -22,6 +22,12 @@
 
         # Equivalent to  inputs'.nixpkgs.legacyPackages.hello;
         packages.default = import ./default.nix { inherit pkgs; };
+
+        devShells.default = pkgs.mkShell {
+          nativeBuildInputs = [
+            pkgs.sbt
+          ];
+        };
       };
       flake = {
         # The usual flake attributes can be defined here, including system-
