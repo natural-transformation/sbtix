@@ -22,13 +22,20 @@ Additionally, this means that Nix can do a better job of enforcing purity where 
 
 ## How?
 
-To install sbtix clone the sbtix git repo and run the following:
+To install sbtix either:
+
 ```
-cd Sbtix
+nix shell github:natural-transformation/sbtix
+```
+
+Or clone the sbtix git repo and:
+
+```
+cd sbtix
 nix-env -f . -i sbtix
 ```
 
-Sbtix provides a script which will connect your project to the sbtix global plugin and launch sbt, it does this by setting the `sbt.global.base` directory to `$HOME/.sbtix`.
+sbtix provides a number of scripts to generate and update Nix expressions to fetch your dependencies and build your sbt project. These scripts work by opening your project in sbt and loading an additional sbtix plugin (via the `sbt.global.base` directory to `$HOME/.sbtix`). After generation, you don't need the sbtix command-line tools to actually build your project from nix.
 
 ### Sbtix commands
 
@@ -45,8 +52,8 @@ Sbtix provides a script which will connect your project to the sbtix global plug
 { pkgs ? import <nixpkgs> {} }: with pkgs;
 let
     sbtixDir = fetchFromGitHub {
-        owner = "teozkr";
-        repo = "Sbtix";
+        owner = "natural-transformation";
+        repo = "sbtix";
         rev = "<<current git rev>>"; # Replace as needed
         sha256 = "<<<corresponding sha256 hash>>>"; # Replace as needed
     };
