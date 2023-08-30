@@ -44,6 +44,20 @@ let
       mkdir -p "$SBTIX_GLBASE_DIR/plugins"
     fi
 
+    SBTIX_SETTINGS_FILE="$SBTIX_GLBASE_DIR/sbtix_settings.sbt"
+    if [ -f $SBTIX_SETTINGS_FILE ]; then
+      echo "Resetting $SBTIX_SETTINGS_FILE"
+      rm $SBTIX_SETTINGS_FILE
+    fi
+    if [ -f sbtix-build-inputs.nix ]; then
+      cat >> $SBTIX_SETTINGS_FILE <<EOF
+resolvers ++= Seq(
+  new MavenCache("sbtix-local-dependencies", file("$(nix-build sbtix-build-inputs.nix)")),
+  Resolver.file("sbtix-local-dependencies-ivy", file("$(nix-build sbtix-build-inputs.nix)"))(Resolver.ivyStylePatterns),
+)
+EOF
+    fi
+
     # if sbtix_plugin.sbt is a link or does not exist then update the link. If it is a regular file do not replace it.
     SBTIX_PLUGIN_FILE="$SBTIX_GLBASE_DIR/plugins/sbtix_plugin.sbt"
     if [ -L "$SBTIX_PLUGIN_FILE" ] || [ ! -f "$SBTIX_PLUGIN_FILE" ]; then

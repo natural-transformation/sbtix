@@ -15,6 +15,7 @@ object CompositionWriter {
          |  sbtix.buildSbt${compositionType.capitalize} {
          |    name = "$buildName";
          |    src = cleanSource ./.;
+         |    #sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix {};
          |    repo = [
          |      (import ./repo.nix)
          |      (import ./project/repo.nix)
