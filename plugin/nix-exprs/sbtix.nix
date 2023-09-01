@@ -115,7 +115,7 @@ in rec {
                   ''ln -fsn "${artifact}" "$out/${outputPath}"''
                   # TODO: include the executable bit as a suffix of the hash.
                   #       Shouldn't matter in our use case though.
-                  ''ln -fsn "${artifact}" "$out/cas/${toLower urlAttrs.sha256}"''
+                  ''ln -fsn "${artifact}" "$out/cas/$(echo ${toLower urlAttrs.sha256} | tr / _)"''
                 ];
         in
             ''
@@ -213,7 +213,7 @@ in rec {
               echo 1>&2 "replacing copies by references..."
               saved=0
               while read file; do
-                hash="$(sha256sum "$file" | cut -c -64)"
+                hash="$(sha256sum "$file" | cut -c -64 | tr / _)"
                 entry="${combinedCas}/cas/$hash"
                 if [[ -e $entry ]]; then
                   size="$(stat -c%s $file)"
