@@ -139,6 +139,7 @@ in rec {
     buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? [], sbtOptions ? "", ...}:
       let
           versionings = unique (flatten (catAttrs "versioning" repo));
+          scalaVersion = (builtins.head versionings).scalaVersion;
           artifacts = mergeAttr "artifacts" repo;
           repos = mergeAttr "repos" repo;
           nixrepo = mkRepo "${name}-repo" artifacts;
@@ -201,7 +202,7 @@ in rec {
             buildPhase = ''
               runHook preBuild
 
-              pwd && sbt compile
+              pwd && sbt ++${scalaVersion} compile
 
               runHook postBuild
             '';
@@ -235,11 +236,15 @@ in rec {
             fetchedRepos = fetchedDependencies;
         };
 
-    buildSbtLibrary = args: buildSbtProject ({
+    buildSbtLibrary = args@{repo, ...}:
+      let
+        mainRepo = builtins.head repo;
+        scalaVersion = (builtins.head mainRepo.versioning).scalaVersion;
+      in buildSbtProject ({
         installPhase = ''
           runHook preInstall
 
-          sbt publishLocal
+          sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
           cp ./.ivy2/local/* $out/ -r
 
