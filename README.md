@@ -146,7 +146,7 @@ A: You can change the value of `compositionType` in your `build.sbt`. Allowed va
 
 ## Thanks
 
-- [Teo Klestrup Röijezon](https://gitlab.com/teozkr) - For creating Sbtix
+- [Natalie Klestrup Röijezon](https://gitlab.com/nightkr) - For creating Sbtix
 - [Eelco Dolstra](https://github.com/edolstra) - For getting this whole Nix thing started
 - [Charles O'Farrel](https://github.com/charleso) - For writing [sbt2nix](https://github.com/charleso/sbt2nix)
 - [Chris Van Vranken](https://github.com/cessationoftime) - For sorting out a lot of dependency-fetching bugs, and adding SBT plugin support
