@@ -3,7 +3,7 @@
 set -euxo pipefail
 cd "$(dirname "$0")"
 
-for f in {one,two,three}/{,project/}repo.nix; do
+for f in {one,two,three}/{,project/}*repo.nix; do
     if test -e $f; then
         rm "$f"
     fi
@@ -14,7 +14,7 @@ sbtix-gen-all
 popd
 
 pushd two
-sbtix-gen
+sbtix-gen-all
 popd
 
 pushd three

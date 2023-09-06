@@ -289,8 +289,11 @@ class CoursierArtifactFetcher(
               Authentication(credentials.userName, credentials.passwd, true, Some(credentials.realm), false, false)
             )
           }
+          case _: sbt.MavenCache =>
+            // No credentials needed for a local maven cache
+            None
           case other =>
-            throw new IllegalStateException(s"How to do credentials for $other?")
+            throw new IllegalStateException(s"Determining credentials for $other of type ${other.getClass} is not yet implemented")
             None
         },
         classLoaders = Seq()

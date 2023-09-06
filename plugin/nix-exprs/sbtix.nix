@@ -103,13 +103,24 @@ let
         );
 
 in rec {
-    mkRepo = name: artifacts: runCommand name {}
+    mkRepo = name: artifacts: localBuildsRepo: runCommand name {}
         (let
             parentDirs = filePath:
                 concatStringsSep "/" (init (splitString "/" filePath));
             linkArtifact = outputPath: urlAttrs:
                 let
-                  artifact = fetchurl urlAttrs;
+                  artifact =
+                    (if builtins.substring 0 5 urlAttrs.url == "file:" then
+                      if localBuildsRepo == "" then
+                        abort "'sbtixBuildInputs' parameter missing from 'buildSbtProgram'/'buildSbtLibrary', but local dependencies found."
+                      else
+                        # replace the nix store path prefix to make sure
+                        # a repo.nix generated with a different version of
+                        # nixpkgs but the same dependencies will still work:
+                        localBuildsRepo + "/" + (lib.strings.concatStringsSep "/" (lib.lists.drop 4 (lib.strings.splitString "/" urlAttrs.url)))
+                    else
+                      fetchurl urlAttrs
+                    );
                 in
                 [ ''mkdir -p "$out/${parentDirs outputPath}"''
                   ''ln -fsn "${artifact}" "$out/${outputPath}"''
@@ -136,39 +147,39 @@ in rec {
     mergeAttr = attr: repo:
         fold (a: b: a // b) {} (catAttrs attr repo);
 
-    buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? [], sbtOptions ? "", ...}:
+    buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? "", sbtOptions ? "", ...}:
       let
+          localBuildsRepo =
+            if builtins.typeOf sbtixBuildInputs == "list" then
+              abort "Update notice: see the sbtix README to learn how to use 'sbtixBuildInputs'"
+            else
+              sbtixBuildInputs;
           versionings = unique (flatten (catAttrs "versioning" repo));
           scalaVersion = (builtins.head versionings).scalaVersion;
           artifacts = mergeAttr "artifacts" repo;
           repos = mergeAttr "repos" repo;
-          nixrepo = mkRepo "${name}-repo" artifacts;
-          thisFetchedDependencies = { inherit repos nixrepo name; };
+          nixrepo = mkRepo "${name}-repo" artifacts localBuildsRepo;
 
-          fetchedDependencies = [thisFetchedDependencies] ++ concatMap (d: d.fetchedRepos) sbtixBuildInputs;
-          repoDefs = concatMap repoConfig fetchedDependencies;
+          repoDefs = (repoConfig { inherit repos nixrepo name; }) ++ (
+            if (localBuildsRepo == "") then [] else [
+              "sbtix-local-maven-dependencies: file://${localBuildsRepo}"
+              "sbtix-local-ivy-dependencies: file://${localBuildsRepo}, ${ivyRepoPattern}"
+            ]);
 
           # This takes a couple of seconds, but only needs to run when dependencies have changed.
           # It's probably near-instantaneous if done in, say, python.
           combinedCas = runCommand "${name}-cas" {} ''
             mkdir -p $out/cas
-            ${concatStringsSep "\n" (map (dep: ''
-                for casRef in ${dep.nixrepo}/cas/*; do
-                  ln -sf "$(readlink "$casRef")" $out/cas/$(basename "$casRef")
-                done
-              '') fetchedDependencies)
-            }
+            for casRef in ${nixrepo}/cas/*; do
+              ln -sf "$(readlink "$casRef")" $out/cas/$(basename "$casRef")
+            done
           '';
 
-          builtDependencies = concatMap (d: [ d ] ++ d.builtRepos) sbtixBuildInputs;
-
-          sbtSetupTemplate = mergeSbtTemplates(map (sbtTemplate repoDefs) versionings);
 
           # SBT Launcher Configuration
           # http://www.scala-sbt.org/0.13.5/docs/Launcher/Configuration.html
           sbtixRepos = writeText "${name}-repos" ''
             [repositories]
-              ${concatStringsSep "\n  " (map (d: "${d.name}: file://${d}, ${ivyRepoPattern}") builtDependencies)}
               ${concatStringsSep "\n  " repoDefs}
             local
             '';
@@ -180,13 +191,6 @@ in rec {
 
             # COURSIER_CACHE env variable is needed if one wants to use non-sbtix repositories in the below repo list, which is sometimes useful.
             COURSIER_CACHE = "./.cache/coursier/v1";
-
-            # configurePhase = ''
-            #   cp -Lr ${sbtSetupTemplate}/ivy ./.ivy2
-            #   cp -Lr ${sbtSetupTemplate}/sbt ./.sbt
-            #   chmod -R 755 ./.ivy2/
-            #   chmod -R 755 ./.sbt/
-            # '';
 
             # set environment variable to affect all SBT commands
             SBT_OPTS = ''
@@ -231,10 +235,7 @@ in rec {
         } // args // {
             repo = null;
             buildInputs = [ makeWrapper jdk sbt ] ++ buildInputs;
-        }) // {
-            builtRepos = builtDependencies;
-            fetchedRepos = fetchedDependencies;
-        };
+        });
 
     buildSbtLibrary = args@{repo, ...}:
       let

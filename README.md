@@ -96,8 +96,50 @@ Libraries are built by running SBT's built-in `publishLocal` task and then copyi
 
 ### Source Dependencies
 
-Sbtix builds can depend on other Sbtix builds by adding the attr `sbtixBuildInputs` to their call to `buildSbt*`. It's used like Nix's `buildInputs`,
-but makes them available to Ivy/Coursier.
+Sbtix builds can depend on dependencies not found in online repositories
+by adding the attr `sbtixBuildInputs` to their call to `buildSbt*`.
+
+These local dependencies should be provided as a derivation that produces
+a Maven or Ivy directory layout in its output, such as `buildSbtLibrary`.
+You should first package the dependency and then `sbtix-gen` the metadata
+for the project using it.
+
+To make sure transitive dependencies and overrides work correctly,
+the local dependency must be available both when running 'sbtix-gen'
+and when building. You provide it in a `sbtix-build-inputs.nix` file,
+which could hold a single dependency:
+
+```
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.callPackage ./path/to/dependency/derivation {}
+```
+
+.. or multiple:
+
+```
+{ pkgs ? import <nixpkgs> {} }:
+
+pkgs.symlinkJoin {
+  name = "sbtix-dependencies";
+
+  paths = [
+    (pkgs.callPackage ./path/to/dependency/derivation {})
+    (pkgs.callPackage ./path/to/other/dependency {})
+  ];
+}
+```
+
+This file is picked up (by name) by `sbtix-gen`, and also should be passed
+in as a parameter in the `buildSbtProgram` invocation in your `default.nix`:
+
+```
+sbtix.buildSbtProgram {
+    ...
+    sbtixBuildInputs = (pkgs.callPackage ./sbtix-build-inputs.nix {});
+    ...
+}
+```
 
 ### Authentication
 
