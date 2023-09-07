@@ -74,6 +74,20 @@ in
  * finally, run `nix-build` to build!
  * any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.
 
+#### Keeping nix files separate from the project sources
+
+In some cases, it can be preferable to keep the nix packaging
+definitions separate from the project being packaged. In that
+case, move the .nix files elsewhere, and point the `src`
+attribute to the location that contains the Scala project.
+
+You're free to choose any filenames and directory layout, as
+long as you make sure you update the references from `default.nix`
+to the generated repo files. When re-generating the files, you'll
+still have to run `sbtix-gen` from the library directory (and
+temporarily copy your `sbtix-build-inputs.nix` there if you
+use that), then move the generated files to your custom location again.
+
 ### Project Types
 
 Libraries and programs need to be "installed" in different ways. Sbtix currently knows how to install "programs" and Maven-style libraries.
