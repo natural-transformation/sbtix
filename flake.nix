@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, flake-parts, ... }:
+  outputs = inputs@{ self, flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit self; } {
       imports = [
         # To import a flake module
@@ -14,7 +14,7 @@
         # 3. Add here: foo.flakeModule
 
       ];
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = { config, self', inputs', pkgs, system, ... }: {
         # Per-system attributes can be defined here. The self' and inputs'
         # module parameters provide easy access to attributes of the same
@@ -27,7 +27,9 @@
         # The usual flake attributes can be defined here, including system-
         # agnostic ones like nixosModule and system-enumerating ones, although
         # those are more easily expressed in perSystem.
-
+        defaultPackage.x86_64-linux = self.packages.x86_64-linux.default;
+        defaultPackage.aarch64-linux = self.packages.aarch64-linux.default;
+        defaultPackage.aarch64-darwin = self.packages.aarch64-darwin.default;
       };
     };
 }
