@@ -9,3 +9,10 @@
 The `tests` directory contains further integration tests. Move
 to the `tests` directory and run the appropriate `run.sh` from
 there.
+
+```console
+nix develop    # load the NIX_PATH and other dependencies
+nix shell .    # build sbtix and add it to PATH
+./tests/multi-build/run.sh
+./tests/template-generation/run.sh
+```

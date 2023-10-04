@@ -5,8 +5,8 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit self; } {
+  outputs = inputs@{ self, flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         # To import a flake module
         # 1. Add foo to inputs
@@ -22,6 +22,14 @@
 
         # Equivalent to  inputs'.nixpkgs.legacyPackages.hello;
         packages.default = import ./default.nix { inherit pkgs; };
+
+        devShells.default = pkgs.mkShell {
+          nativeBuildInputs = [
+            pkgs.sbt
+          ];
+          # TODO: Don't rely on NIX_PATH in tests.
+          NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
+        };
       };
       flake = {
         # The usual flake attributes can be defined here, including system-
