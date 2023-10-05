@@ -71,7 +71,10 @@ case class NixArtifactCollection(artifacts: Seq[NixArtifact]) extends NixBuilder
 
 }
 
-case class NixArtifact(repoName: String, relative: String, url: String, sha256: String) extends NixBuilder {
+trait NixArtifact extends NixBuilder {
+}
+
+case class NixFetchedArtifact(repoName: String, relative: String, url: String, sha256: String) extends NixArtifact {
   val toNixRef = s"${quote(repoName + "/" + relative)}"
 
   def toNixValue =

@@ -63,7 +63,7 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       targetArtifacts.map { artifactLocalFile =>
         val calcUrl = ga.calculateURI(artifactLocalFile).toURL
 
-        NixArtifact(
+        NixFetchedArtifact(
           repoName,
           calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
           calcUrl.toString,
@@ -80,7 +80,7 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       metaArtifacts.filter(f => """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.artifactUrl).isDefined)
 
     targetMetaArtifacts.map { meta =>
-      NixArtifact(
+      NixFetchedArtifact(
         repoName = repoName,
         relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
         url = meta.artifactUrl,
