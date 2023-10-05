@@ -76,4 +76,8 @@ stdenv.mkDerivation {
     ln -s ${sbtixPluginRepo}/plugin-repo $out
     ln -s ${pluginsSbtix} $out/sbtix_plugin.sbt
   '';
+
+  meta = {
+    mainProgram = "sbtix";
+  };
 }
