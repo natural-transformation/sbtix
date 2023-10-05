@@ -155,6 +155,13 @@ sbtix.buildSbtProgram {
 }
 ```
 
+#### `nix` Extra Attribute
+
+Source dependencies do not need locking. Originally this was implemented by completely ignoring dependencies with `nix` [extra attribute](https://www.scala-sbt.org/1.x/docs/Library-Management.html#Extra+Attributes), but this is not necessary anymore.
+
+Additionally, `sbtix` will generate a `type = "built";` entry for JARs it finds in the `sbtix-build-inputs.nix` repository, and handle them appropriately during the build.
+
+
 ### Authentication
 
 In order to use a private repository, add your credentials to `coursierCredentials`. Note that the key should be the name of the repository, see

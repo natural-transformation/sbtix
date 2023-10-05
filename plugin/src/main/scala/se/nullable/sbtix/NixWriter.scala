@@ -83,3 +83,14 @@ case class NixFetchedArtifact(repoName: String, relative: String, url: String, s
        |  sha256 = ${quote(sha256)};
        |}""".stripMargin
 }
+
+case class NixBuiltArtifact(repoName: String, path: String) extends NixArtifact {
+  val toNixRef = s"${quote(repoName + "/" + path)}"
+
+  def toNixValue =
+    s"""{
+       |  type = "built";
+       |  repo = ${quote(repoName)};
+       |  path = ${quote(path)};
+       |}""".stripMargin
+}

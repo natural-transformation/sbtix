@@ -44,7 +44,15 @@ object FindArtifactsOfRepo {
     }
 }
 
+object NixBuiltReposSetting {
+  val builtRepos = sys.env.get("SBTIX_NIX_BUILT_REPOS").map(_.split(",").toSet).getOrElse(Set.empty)
+}
+
 class FindArtifactsOfRepo(repoName: String, root: String) {
+  /**
+   * Whether this repo is a nix-built repo.
+   */
+  val isNixBuiltRepo: Boolean = NixBuiltReposSetting.builtRepos.contains(repoName)
 
   def findArtifacts(logger: Logger, modules: Set[GenericModule]): Set[NixArtifact] =
     modules.flatMap { ga =>
@@ -63,14 +71,14 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       targetArtifacts.map { artifactLocalFile =>
         val calcUrl = ga.calculateURI(artifactLocalFile).toURL
 
-        NixFetchedArtifact(
+        improveArtifact(NixFetchedArtifact(
           repoName,
           calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
           calcUrl.toString,
           FindArtifactsOfRepo
             .fetchChecksum(calcUrl.toString, "Artifact", artifactLocalFile.toURI.toURL)
             .get
-        )
+        ))
       }
     }
 
@@ -80,12 +88,26 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       metaArtifacts.filter(f => """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.artifactUrl).isDefined)
 
     targetMetaArtifacts.map { meta =>
-      NixFetchedArtifact(
+      improveArtifact(NixFetchedArtifact(
         repoName = repoName,
         relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
         url = meta.artifactUrl,
         sha256 = meta.checkSum
-      )
+      ))
+    }
+  }
+
+  /**
+   * Artifacts start out as fetched artifacts, because that's all SBT knows.
+   * This function picks out the ones that are built artifacts, and returns
+   * either a NixBuiltArtifact or a NixFetchedArtifact.
+   */
+  def improveArtifact(artifact: NixFetchedArtifact): NixArtifact = {
+    if (isNixBuiltRepo) {
+      NixBuiltArtifact(repoName, artifact.relative)
+    }
+    else {
+      artifact
     }
   }
 
