@@ -26,7 +26,7 @@ new MavenCache("sbtix-local-dependencies", file("$(nix-build sbtix-build-inputs.
 Resolver.file("sbtix-local-dependencies-ivy", file("$(nix-build sbtix-build-inputs.nix)"))(Resolver.ivyStylePatterns),
 )
 EOF
-  export SBTIX_NIX_BUILT_REPOS="nix-sbtix-local-dependencies"
+  export SBTIX_NIX_BUILT_REPOS="nix-sbtix-local-dependencies,nix-sbtix-local-dependencies-ivy"
 fi
 
 # if sbtix_plugin.sbt is a link or does not exist then update the link. If it is a regular file do not replace it.
