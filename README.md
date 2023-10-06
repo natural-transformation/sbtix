@@ -24,13 +24,13 @@ Additionally, this means that Nix can do a better job of enforcing purity where 
 
 To install sbtix either:
 
-```
+```bash
 nix shell github:natural-transformation/sbtix
 ```
 
 Or clone the sbtix git repo and:
 
-```
+```bash
 cd sbtix
 nix-env -f . -i sbtix
 ```
@@ -123,7 +123,7 @@ the local dependency must be available both when running 'sbtix-gen'
 and when building. You provide it in a `sbtix-build-inputs.nix` file,
 which could hold a single dependency:
 
-```
+```nix
 { pkgs ? import <nixpkgs> {} }:
 
 pkgs.callPackage ./path/to/dependency/derivation {}
@@ -131,7 +131,7 @@ pkgs.callPackage ./path/to/dependency/derivation {}
 
 .. or multiple:
 
-```
+```nix
 { pkgs ? import <nixpkgs> {} }:
 
 pkgs.symlinkJoin {
@@ -147,7 +147,7 @@ pkgs.symlinkJoin {
 This file is picked up (by name) by `sbtix-gen`, and also should be passed
 in as a parameter in the `buildSbtProgram` invocation in your `default.nix`:
 
-```
+```nix
 sbtix.buildSbtProgram {
     ...
     sbtixBuildInputs = (pkgs.callPackage ./sbtix-build-inputs.nix {});
@@ -179,7 +179,7 @@ Q: Why I am getting errors trying to generate `repo.nix` files when using the Pl
 
 A: You probably need to add the following resolver to your project for Sbtix to find.
 
-```
+```scala
 // if using PlayFramework
 resolvers += Resolver.url("sbt-plugins-releases", url("https://dl.bintray.com/playframework/sbt-plugin-releases"))(Resolver.ivyStylePatterns)
 ```
@@ -189,12 +189,12 @@ Q: When I `nix-build` it sbt complains `java.io.IOException: Cannot run program 
 A: You are likely depending on a project via git.  This isn't recommended usage for sbtix since it leads to non-deterministic builds. However you can enable this by making two small changes to sbtix.nix, in order to make git a buildInput.
 
 top of sbtix.nix with git as buildinput
-```
+```nix
 { runCommand, fetchurl, lib, stdenv, jdk, sbt, writeText, git }:
 ```
 
 bottom of sbtix.nix with git as buildinput
-```
+```nix
 buildInputs = [ jdk sbt git ] ++ buildInputs;
 ```
 
