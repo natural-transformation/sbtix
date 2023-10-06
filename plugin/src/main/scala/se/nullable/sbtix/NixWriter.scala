@@ -90,7 +90,6 @@ case class NixBuiltArtifact(repoName: String, path: String) extends NixArtifact 
   def toNixValue =
     s"""{
        |  type = "built";
-       |  repo = ${quote(repoName)};
        |  path = ${quote(path)};
        |}""".stripMargin
 }
