@@ -157,10 +157,9 @@ sbtix.buildSbtProgram {
 
 #### `nix` Extra Attribute
 
-Source dependencies do not need locking. Originally this was implemented by completely ignoring dependencies with `nix` [extra attribute](https://www.scala-sbt.org/1.x/docs/Library-Management.html#Extra+Attributes), but this is not necessary anymore.
+By adding the `nix` [extra attribute](https://www.scala-sbt.org/1.x/docs/Library-Management.html#Extra+Attributes), `sbtix` will ignore the dependency for the purpose of locking.
 
-Additionally, `sbtix` will generate a `type = "built";` entry for JARs it finds in the `sbtix-build-inputs.nix` repository, and handle them appropriately during the build.
-
+This used to be the only mechanism for handling local dependencies, but is now a legacy solution and/or escape hatch.
 
 ### Authentication
 
