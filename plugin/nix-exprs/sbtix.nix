@@ -102,6 +102,11 @@ let
             concatStringsSep "\n" (["mkdir -p $out"] ++ concatLists (map copyTemplate templates))
         );
 
+  copyFile = name: input:
+    runCommand name { inherit input; } ''
+      cp -a $input $out
+    '';
+
 in rec {
     mkRepo = name: artifacts: localBuildsRepo: runCommand name {}
         (let
@@ -110,23 +115,28 @@ in rec {
             linkArtifact = outputPath: urlAttrs:
                 let
                   artifact =
-                    (if builtins.substring 0 5 urlAttrs.url == "file:" then
+                    if urlAttrs.type or null == "built" then
                       if localBuildsRepo == "" then
                         abort "'sbtixBuildInputs' parameter missing from 'buildSbtProgram'/'buildSbtLibrary', but local dependencies found."
                       else
-                        # replace the nix store path prefix to make sure
-                        # a repo.nix generated with a different version of
-                        # nixpkgs but the same dependencies will still work:
-                        localBuildsRepo + "/" + (lib.strings.concatStringsSep "/" (lib.lists.drop 4 (lib.strings.splitString "/" urlAttrs.url)))
+                        # Unlike fetched JARs which are content addressed derivations by virtue of being fixed-output,
+                        # these copies are not content addressed, because ca-derivations is still experimental.
+                        # This is unfortunate, because it will create duplication in the store during builds and development,
+                        # but at least these can be GC-ed and allow the end result to only reference the single JARs that
+                        # result from this copying operation.
+                        copyFile (baseNameOf urlAttrs.path) (localBuildsRepo + "/" + urlAttrs.path)
                     else
-                      fetchurl urlAttrs
-                    );
+                      fetchurl urlAttrs;
+                  hashBash =
+                    if urlAttrs.type or null == "built"
+                    then ''$(sha256sum "${artifact}" | cut -c -64)''
+                    else ''$(echo ${toLower urlAttrs.sha256} | tr / _)'';
                 in
                 [ ''mkdir -p "$out/${parentDirs outputPath}"''
                   ''ln -fsn "${artifact}" "$out/${outputPath}"''
                   # TODO: include the executable bit as a suffix of the hash.
                   #       Shouldn't matter in our use case though.
-                  ''ln -fsn "${artifact}" "$out/cas/$(echo ${toLower urlAttrs.sha256} | tr / _)"''
+                  ''ln -fsn "${artifact}" "$out/cas/${hashBash}"''
                 ];
         in
             ''
@@ -232,6 +242,17 @@ in rec {
               runHook postDist
             '';
 
+            # These inputs are only meant for the build process. If they stick
+            # around in the outputs, they'd just bloat the user package for no
+            # good reason.
+            disallowedReferences = [
+              combinedCas
+              sbtixRepos
+              nixrepo
+            ]
+            ++ lib.optional (localBuildsRepo != "") [
+              localBuildsRepo
+            ];
         } // args // {
             repo = null;
             buildInputs = [ makeWrapper jdk sbt ] ++ buildInputs;
