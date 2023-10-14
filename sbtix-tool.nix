@@ -1,9 +1,9 @@
-{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, sbt }:
+{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, jre, sbt }:
 let
   version = "0.3";
   versionSnapshotSuffix = "-SNAPSHOT";
 
-  sbtix = callPackage ./plugin/nix-exprs/sbtix.nix { inherit jdk sbt; };
+  sbtix = callPackage ./plugin/nix-exprs/sbtix.nix { inherit jdk jre sbt; };
 
   sbtixPluginRepo = sbtix.buildSbtProject {
         name = "sbtix-plugin";
