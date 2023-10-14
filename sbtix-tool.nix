@@ -1,4 +1,4 @@
-{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, sbt }:
+{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, sbt }:
 let
   version = "0.3";
   versionSnapshotSuffix = "-SNAPSHOT";
