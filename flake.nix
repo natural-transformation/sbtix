@@ -6,13 +6,13 @@
     hercules-ci-effects.url = "github:hercules-ci/hercules-ci-effects";
   };
 
-  outputs = inputs@{ self, flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit self; } {
+  outputs = inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
       imports = [
         inputs.hercules-ci-effects.flakeModule
         ./tests/flake-module.nix
       ];
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = { config, self', inputs', pkgs, system, ... }: {
         packages.default = import ./default.nix { inherit pkgs; };
 
@@ -27,11 +27,13 @@
           NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
         };
       };
+      herculesCI = {
+        ciSystems = [ "x86_64-linux" "aarch64-linux" ];
+      };
       flake = {
         # The usual flake attributes can be defined here, including system-
         # agnostic ones like nixosModule and system-enumerating ones, although
         # those are more easily expressed in perSystem.
-
       };
     };
 }
