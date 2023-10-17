@@ -10,4 +10,5 @@ version := ver
 
 libraryDependencies += org %% "mb-one" % ver extra ("nix" -> "")
 
-projectID := projectID.value.extra("nix" -> "")
+// For this one, we don't set the "nix" extra attribute, to test that we can detect nix-built dependencies without it.
+// projectID := projectID.value.extra("nix" -> "")

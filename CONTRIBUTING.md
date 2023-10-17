@@ -10,6 +10,13 @@ The `tests` directory contains further integration tests. Move
 to the `tests` directory and run the appropriate `run.sh` from
 there.
 
+```console
+nix develop    # load the NIX_PATH and other dependencies
+nix shell .    # build sbtix and add it to PATH
+./tests/multi-build/run.sh
+./tests/template-generation/run.sh
+```
+
 #### CI preview
 
 The integration tests aren't Nix builds because they require network access and build access to the Nix store.
