@@ -28,9 +28,15 @@ object NixPlugin extends AutoPlugin {
             .dependencies(_, scalaVersion.value, scalaBinaryVersion.value)
         )
         .map(_._2)
-        .filterNot {
-          _.module.organization.value == "se.nullable.sbtix"
-        } //ignore the sbtix dependency that gets added because of the global sbtix plugin
+        .filterNot { dep =>
+          //ignore the sbtix dependency that gets added because of the global sbtix plugin
+          dep.module.organization.value == "se.nullable.sbtix" ||
+          // ignore the metals and debug adapter plugins found in metals.sbt
+          (dep.module.organization.value == "org.scalameta" && dep.module.name.value == "sbt-metals") ||
+          (dep.module.organization.value == "ch.epfl.scala" && dep.module.name.value == "sbt-debug-adapter") ||
+          (dep.module.organization.value == "ch.epfl.scala" && dep.module.name.value == "sbt-bloop") ||
+          (dep.module.organization.value == "org.scala-debugger" && dep.module.name.value == "sbt-jdi-tools")
+        }
 
       GenProjectData(
         scalaVersion.value,

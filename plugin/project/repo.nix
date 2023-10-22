@@ -8,45 +8,53 @@
     "nix-public" = "";
   };
   "artifacts" = {
-    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3-javadoc.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3-javadoc.jar";
+    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5-javadoc.jar";
+      sha256 = "BCD6DFD9367C31953BDFAA0F66BE73FAA05887FD1CE33C5404DB9631C0B2704F";
+    };
+    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5-sources.jar";
+      sha256 = "7A80CBE88CA3C41EC893282D226CCBD23352ECAC86239FAB8F6543B959B07480";
+    };
+    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5.jar";
+      sha256 = "51B7E48138D4E09887EA0342AFDE42B22488C7D0753135F95AA03E1E274FBBCC";
+    };
+    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5.pom" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.5/bloop-config_2.12-1.5.5.pom";
+      sha256 = "6A2520EE38D3624816CF527C1415D2DBD92AA5484B0EB32799A09C5E610023C4";
+    };
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11-javadoc.jar";
       sha256 = "D653AADE571393B17CF4BF5157A64EBBA0F2D6F2909254CD0E120159E52AECC6";
     };
-    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3-sources.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3-sources.jar";
-      sha256 = "F090487569C432A8E26B5298BF0922FAD1295BB904575F408C25FDD5847B4EAE";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11-sources.jar";
+      sha256 = "8D65113CEFE2A7391038EF90190DF3D587221CD42B7075560BAA8BD30F00AF56";
     };
-    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3.jar";
-      sha256 = "DA204024A896D84E4EBD001C8003EEA4DF8F438B4C0771DC2A43952EF3124A35";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11.jar";
+      sha256 = "2003B9503C70FC4310161C61FD18F4F6B5F01E9106240B1DCDAA49BBA9523D84";
     };
-    "nix-public/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3.pom" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/bloop-config_2.12/1.5.3/bloop-config_2.12-1.5.3.pom";
-      sha256 = "81C16B92E5E9022D8A0EB9A2428F66DEC5A24283BD4CD85B2D213582609C6886";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11.pom" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop-1.5.11.pom";
+      sha256 = "3782C83D6F16D6A6129102DCA20B19BC97364A36D396C3F7FD7E47D77070955C";
     };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3-javadoc.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3-javadoc.jar";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11-javadoc.jar";
       sha256 = "D653AADE571393B17CF4BF5157A64EBBA0F2D6F2909254CD0E120159E52AECC6";
     };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3-sources.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3-sources.jar";
-      sha256 = "9CA27984A9C4C346A7CBE36ACB2CD6E692629BACA33893DBCBF483798FDF6012";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11-sources.jar";
+      sha256 = "8D65113CEFE2A7391038EF90190DF3D587221CD42B7075560BAA8BD30F00AF56";
     };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3.jar";
-      sha256 = "65904022F1A0D54D691F7AAD007ABEF0DAC1B1DFA07427297B23D3A7427F1DF7";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11.jar" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11.jar";
+      sha256 = "2003B9503C70FC4310161C61FD18F4F6B5F01E9106240B1DCDAA49BBA9523D84";
     };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3.pom" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop-1.5.3.pom";
-      sha256 = "44318B59E5FB6676F664A519853EF1F15888E0F2C184DEA456CFBB329AE32593";
-    };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop_2.12_1.0-1.5.3.jar" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop_2.12_1.0-1.5.3.jar";
-      sha256 = "65904022F1A0D54D691F7AAD007ABEF0DAC1B1DFA07427297B23D3A7427F1DF7";
-    };
-    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop_2.12_1.0-1.5.3.pom" = {
-      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.3/sbt-bloop_2.12_1.0-1.5.3.pom";
-      sha256 = "3619130E66F4C2855537363C5F404CCB1CE76964143AD4825EA375B0AB15B403";
+    "nix-public/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11.pom" = {
+      url = "https://repo1.maven.org/maven2/ch/epfl/scala/sbt-bloop_2.12_1.0/1.5.11/sbt-bloop_2.12_1.0-1.5.11.pom";
+      sha256 = "DD58BE3112F1AE2527AFA5F01F71F301E3B6B22B16296A2A5C9D03E4EE422383";
     };
     "nix-public/com/eed3si9n/gigahorse-apache-http_2.12/0.7.0/gigahorse-apache-http_2.12-0.7.0-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/com/eed3si9n/gigahorse-apache-http_2.12/0.7.0/gigahorse-apache-http_2.12-0.7.0-javadoc.jar";
