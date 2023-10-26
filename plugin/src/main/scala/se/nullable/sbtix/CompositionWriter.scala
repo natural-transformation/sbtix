@@ -23,7 +23,7 @@ object CompositionWriter {
          |  sbtix.buildSbt${compositionType.capitalize} {
          |    name = "$buildName";
          |    src = cleanSource (gitignore.gitignoreSource ./.);
-         |    #sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix {};
+         |    #sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix { inherit pkgs; };
          |    repo = [
          |      (import ./repo.nix)
          |      (import ./project/repo.nix)
