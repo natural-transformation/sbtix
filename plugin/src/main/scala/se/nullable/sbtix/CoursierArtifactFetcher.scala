@@ -4,7 +4,7 @@ import java.io.File
 import java.net.{URI, URL}
 import sbt.{uri, Credentials, Logger, ModuleID, PatternsBasedRepository, ProjectRef, Resolver}
 import coursier.*
-import coursier.core.Authentication
+import lmcoursier.internal.shaded.coursier.core.Authentication
 import coursier.util.*
 import coursier.cache.CachePolicy
 import coursier.cache.Cache

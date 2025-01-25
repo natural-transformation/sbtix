@@ -1,6 +1,6 @@
 { callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, jre, sbt }:
 let
-  version = "0.3";
+  version = "0.4";
   versionSnapshotSuffix = "-SNAPSHOT";
 
   sbtix = callPackage ./plugin/nix-exprs/sbtix.nix { inherit jdk jre sbt; };

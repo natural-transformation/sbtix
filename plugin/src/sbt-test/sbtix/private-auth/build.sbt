@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "2.13.9"
+ThisBuild / scalaVersion := "2.13.16"
 
 lazy val one = project.settings(
   credentials += Credentials(realm = "Very secret stuff!", host = "localhost", userName = "test", passwd = "test"),
