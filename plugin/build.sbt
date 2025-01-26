@@ -50,5 +50,6 @@ Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 scalafmtOnCompile := false
 
 libraryDependencies ++= Seq(
-  "io.get-coursier" %% "coursier" % "2.1.0-RC1"
+  "io.get-coursier" %% "coursier" % "2.1.16",
+  "io.get-coursier" %% "coursier-sbt-maven-repository" % "2.1.16"
 )

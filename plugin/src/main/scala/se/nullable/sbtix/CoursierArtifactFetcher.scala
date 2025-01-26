@@ -245,7 +245,6 @@ class CoursierArtifactFetcher(
   }
 
   private def getAllDependencies(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
-
     // Convert sbt Resolvers to coursier Repositories
     val repos = resolvers.flatMap { resolver =>
       val maybeAuth: Option[Authentication] = resolver match {
@@ -295,7 +294,8 @@ class CoursierArtifactFetcher(
         case otherRepo =>
           // From the signature on `Resolvers.repository` you would expect this to be dead code,
           // but depending on the classpath `repository` may return a shaded Repository object
-          // that needs to be converted:
+          // that needs to be converted;
+          // since coursier 2.1.0-RC6, the newly added SbtMavenRepository is also converted here
           convertRepository(otherRepo)
       }
     }

@@ -23,7 +23,7 @@ object FindArtifactsOfRepo {
 
   private def calculateChecksum(url: URL): Try[String] =
     try {
-      val hash = MessageDigest getInstance "SHA-256"
+      val hash = MessageDigest.getInstance("SHA-256")
       val is   = url.openConnection.getInputStream()
       val buf  = Array.ofDim[Byte](1048576)
       try {

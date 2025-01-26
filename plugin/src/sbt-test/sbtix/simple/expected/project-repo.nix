@@ -297,6 +297,10 @@
       url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager-1.11.0.pom";
       sha256 = "A2203D75E64C44A522167BCC0D03A8F9ECDBF1E0C4A8FD611AB0159F1B232287";
     };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-javadoc.jar";
+      sha256 = "3C89B5F6C1043FD0C71362C9D87CE6C055A5287191671585D9B938722FAC09B6";
+    };
     "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-sources.jar" = {
       url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-sources.jar";
       sha256 = "AF8DBF59A1421DCAC1F817EF38674FB9F8CE56061E6B413D7FA48E7BC78909D3";

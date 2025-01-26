@@ -16,34 +16,33 @@ object Conversions {
    *   of type 'Any' because the shaded types are not accessible during
    *   compilation
    */
-  def convertRepository(repository: Any): coursier.core.Repository =
+  def convertRepository(repository: Any): coursier.core.Repository = {
     /**
      * Needs reflection because the sbt shading hides these classes from the
      * classpath:
      */
-    if (repository.getClass.getName.endsWith("MavenRepository")) {
-      val reflectiveMavenRepo = repository.asInstanceOf[{
-          val root: String
-          val authentication: Option[Any]
-        }
-      ]
-      coursier.maven.MavenRepository(
-        reflectiveMavenRepo.root,
-        reflectiveMavenRepo.authentication.map(convertAuthentication)
+    val className = repository.getClass.getName
+    if (className.endsWith("SbtMavenRepository")) {
+      val reflectiveRepo = repository.asInstanceOf[{
+        val root: String
+        val authentication: Option[Any]
+      }]
+      coursier.maven.SbtMavenRepository(
+        reflectiveRepo.root,
+        reflectiveRepo.authentication.map(convertAuthentication)
       )
-    } else if (repository.getClass.getName.endsWith("IvyRepository")) {
+    } else if (className.endsWith("IvyRepository")) {
       val reflectiveIvyRepo = repository.asInstanceOf[{
-          val pattern: Any
-          val metadataPatternOpt: Option[Any]
-          val changingOpt: Option[Boolean]
-          val withChecksums: Boolean
-          val withSignatures: Boolean
-          val withArtifacts: Boolean
-          val dropInfoAttributes: Boolean
-          val authentication: Option[Any]
-          val versionsCheckHasModule: Boolean
-        }
-      ]
+        val pattern: Any
+        val metadataPatternOpt: Option[Any]
+        val changingOpt: Option[Boolean]
+        val withChecksums: Boolean
+        val withSignatures: Boolean
+        val withArtifacts: Boolean
+        val dropInfoAttributes: Boolean
+        val authentication: Option[Any]
+        val versionsCheckHasModule: Boolean
+      }]
       coursier.ivy.IvyRepository(
         convertPattern(reflectiveIvyRepo.pattern),
         reflectiveIvyRepo.metadataPatternOpt.map(convertPattern),
@@ -55,29 +54,38 @@ object Conversions {
         reflectiveIvyRepo.authentication.map(convertAuthentication),
         reflectiveIvyRepo.versionsCheckHasModule
       )
+    } else if (className.endsWith("MavenRepository")) {
+      val reflectiveMavenRepo = repository.asInstanceOf[{
+        val root: String
+        val authentication: Option[Any]
+      }]
+      coursier.maven.MavenRepository(
+        reflectiveMavenRepo.root,
+        reflectiveMavenRepo.authentication.map(convertAuthentication)
+      )
     } else {
-      throw new IllegalStateException(s"Could not convert repository $repository")
+      throw new IllegalStateException(s"Unhandled repository type: $className")
     }
+  }
 
   private def convertAuthentication(authentication: Any): coursier.core.Authentication = {
-    val reflectiveAuthentication = authentication.asInstanceOf[{
-        val user: String
-        val passwordOpt: Option[String]
-        val httpHeaders: Seq[(String, String)]
-        val optional: Boolean
-        val realmOpt: Option[String]
-        val httpsOnly: Boolean
-        val passOnRedirect: Boolean
-      }
-    ]
+    val reflectiveAuth = authentication.asInstanceOf[{
+      val user: String
+      val passwordOpt: Option[String]
+      val httpHeaders: Seq[(String, String)]
+      val optional: Boolean
+      val realmOpt: Option[String]
+      val httpsOnly: Boolean
+      val passOnRedirect: Boolean
+    }]
     coursier.core.Authentication(
-      reflectiveAuthentication.user,
-      reflectiveAuthentication.passwordOpt,
-      reflectiveAuthentication.httpHeaders,
-      reflectiveAuthentication.optional,
-      reflectiveAuthentication.realmOpt,
-      reflectiveAuthentication.httpsOnly,
-      reflectiveAuthentication.passOnRedirect
+      reflectiveAuth.user,
+      reflectiveAuth.passwordOpt,
+      reflectiveAuth.httpHeaders,
+      reflectiveAuth.optional,
+      reflectiveAuth.realmOpt,
+      reflectiveAuth.httpsOnly,
+      reflectiveAuth.passOnRedirect
     )
   }
 
