@@ -4,6 +4,7 @@ import java.io.IOException
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.Semaphore
+import java.net.URI
 
 import sbt.Logger
 
@@ -49,6 +50,7 @@ object NixBuiltReposSetting {
 }
 
 class FindArtifactsOfRepo(repoName: String, root: String) {
+
   /**
    * Whether this repo is a nix-built repo.
    */
@@ -56,7 +58,7 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
 
   def findArtifacts(logger: Logger, modules: Set[GenericModule]): Set[NixArtifact] =
     modules.flatMap { ga =>
-      val rootUrl = new URL(root)
+      val rootUrl = URI.create(root).toURL()
 
       val authedRootURI = ga.authed(rootUrl) //authenticated version of the rootUrl
 
@@ -71,14 +73,16 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       targetArtifacts.map { artifactLocalFile =>
         val calcUrl = ga.calculateURI(artifactLocalFile).toURL
 
-        improveArtifact(NixFetchedArtifact(
-          repoName,
-          calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
-          calcUrl.toString,
-          FindArtifactsOfRepo
-            .fetchChecksum(calcUrl.toString, "Artifact", artifactLocalFile.toURI.toURL)
-            .get
-        ))
+        improveArtifact(
+          NixFetchedArtifact(
+            repoName,
+            calcUrl.toString.replace(authedRootURI.toString, "").stripPrefix("/"),
+            calcUrl.toString,
+            FindArtifactsOfRepo
+              .fetchChecksum(calcUrl.toString, "Artifact", artifactLocalFile.toURI.toURL)
+              .get
+          )
+        )
       }
     }
 
@@ -88,12 +92,14 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
       metaArtifacts.filter(f => """.*(\.jar|\.pom|ivy.xml)$""".r.findFirstIn(f.artifactUrl).isDefined)
 
     targetMetaArtifacts.map { meta =>
-      improveArtifact(NixFetchedArtifact(
-        repoName = repoName,
-        relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
-        url = meta.artifactUrl,
-        sha256 = meta.checkSum
-      ))
+      improveArtifact(
+        NixFetchedArtifact(
+          repoName = repoName,
+          relative = meta.artifactUrl.replace(root, "").stripPrefix("/"),
+          url = meta.artifactUrl,
+          sha256 = meta.checkSum
+        )
+      )
     }
   }
 
@@ -102,13 +108,11 @@ class FindArtifactsOfRepo(repoName: String, root: String) {
    * This function picks out the ones that are built artifacts, and returns
    * either a NixBuiltArtifact or a NixFetchedArtifact.
    */
-  def improveArtifact(artifact: NixFetchedArtifact): NixArtifact = {
+  def improveArtifact(artifact: NixFetchedArtifact): NixArtifact =
     if (isNixBuiltRepo) {
       NixBuiltArtifact(repoName, artifact.relative)
-    }
-    else {
+    } else {
       artifact
     }
-  }
 
 }
