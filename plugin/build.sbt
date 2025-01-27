@@ -2,7 +2,7 @@ sbtPlugin := true
 
 name         := "sbtix"
 organization := "se.nullable.sbtix"
-version      := "0.3-SNAPSHOT"
+version      := "0.4-SNAPSHOT"
 
 publishTo := {
     if (isSnapshot.value) {
@@ -50,5 +50,6 @@ Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 scalafmtOnCompile := false
 
 libraryDependencies ++= Seq(
-  "io.get-coursier" %% "coursier" % "2.0.16",
+  "io.get-coursier" %% "coursier" % "2.1.16",
+  "io.get-coursier" %% "coursier-sbt-maven-repository" % "2.1.16"
 )

@@ -12,30 +12,36 @@ object Conversions {
     )
 
   /**
-   * @param repository of type 'Any' because the shaded types are not accessible during compilation
+   * @param repository
+   *   of type 'Any' because the shaded types are not accessible during
+   *   compilation
    */
   def convertRepository(repository: Any): coursier.core.Repository = {
-    /** Needs reflection because the sbt shading hides these classes from the classpath: */
-    if (repository.getClass.getName.endsWith("MavenRepository")) {
-      val reflectiveMavenRepo = repository.asInstanceOf[ {
+    /**
+     * Needs reflection because the sbt shading hides these classes from the
+     * classpath:
+     */
+    val className = repository.getClass.getName
+    if (className.endsWith("SbtMavenRepository")) {
+      val reflectiveRepo = repository.asInstanceOf[{
         val root: String
         val authentication: Option[Any]
       }]
-      coursier.maven.MavenRepository(
-        reflectiveMavenRepo.root,
-        reflectiveMavenRepo.authentication.map(convertAuthentication)
+      coursier.maven.SbtMavenRepository(
+        reflectiveRepo.root,
+        reflectiveRepo.authentication.map(convertAuthentication)
       )
-    } else if (repository.getClass.getName.endsWith("IvyRepository")) {
-      val reflectiveIvyRepo = repository.asInstanceOf[ {
+    } else if (className.endsWith("IvyRepository")) {
+      val reflectiveIvyRepo = repository.asInstanceOf[{
         val pattern: Any
         val metadataPatternOpt: Option[Any]
         val changingOpt: Option[Boolean]
         val withChecksums: Boolean
         val withSignatures: Boolean
-        val withArtifacts : Boolean
-        val dropInfoAttributes : Boolean
-        val authentication : Option[Any]
-        val versionsCheckHasModule : Boolean
+        val withArtifacts: Boolean
+        val dropInfoAttributes: Boolean
+        val authentication: Option[Any]
+        val versionsCheckHasModule: Boolean
       }]
       coursier.ivy.IvyRepository(
         convertPattern(reflectiveIvyRepo.pattern),
@@ -48,13 +54,22 @@ object Conversions {
         reflectiveIvyRepo.authentication.map(convertAuthentication),
         reflectiveIvyRepo.versionsCheckHasModule
       )
+    } else if (className.endsWith("MavenRepository")) {
+      val reflectiveMavenRepo = repository.asInstanceOf[{
+        val root: String
+        val authentication: Option[Any]
+      }]
+      coursier.maven.MavenRepository(
+        reflectiveMavenRepo.root,
+        reflectiveMavenRepo.authentication.map(convertAuthentication)
+      )
     } else {
-      throw new IllegalStateException(s"Could not convert repository $repository")
+      throw new IllegalStateException(s"Unhandled repository type: $className")
     }
   }
 
   private def convertAuthentication(authentication: Any): coursier.core.Authentication = {
-    val reflectiveAuthentication =  authentication.asInstanceOf[ {
+    val reflectiveAuth = authentication.asInstanceOf[{
       val user: String
       val passwordOpt: Option[String]
       val httpHeaders: Seq[(String, String)]
@@ -64,18 +79,18 @@ object Conversions {
       val passOnRedirect: Boolean
     }]
     coursier.core.Authentication(
-      reflectiveAuthentication.user,
-      reflectiveAuthentication.passwordOpt,
-      reflectiveAuthentication.httpHeaders,
-      reflectiveAuthentication.optional,
-      reflectiveAuthentication.realmOpt,
-      reflectiveAuthentication.httpsOnly,
-      reflectiveAuthentication.passOnRedirect
+      reflectiveAuth.user,
+      reflectiveAuth.passwordOpt,
+      reflectiveAuth.httpHeaders,
+      reflectiveAuth.optional,
+      reflectiveAuth.realmOpt,
+      reflectiveAuth.httpsOnly,
+      reflectiveAuth.passOnRedirect
     )
   }
 
   private def convertPattern(pattern: Any): coursier.ivy.Pattern = {
-    def convertChunk(chunk: Any): coursier.ivy.Pattern.Chunk = {
+    def convertChunk(chunk: Any): coursier.ivy.Pattern.Chunk =
       if (chunk.getClass.getName.endsWith("Var"))
         coursier.ivy.Pattern.Chunk.Var(chunk.asInstanceOf[{ val name: String }].name)
       else if (chunk.getClass.getName.endsWith("Opt"))
@@ -84,7 +99,6 @@ object Conversions {
         coursier.ivy.Pattern.Chunk.Const(chunk.asInstanceOf[{ val value: String }].value)
       else
         throw new IllegalArgumentException(s"Could not convert chunk $chunk of type ${chunk.getClass.getName}")
-    }
 
     coursier.ivy.Pattern(pattern.asInstanceOf[{ val chunks: Seq[Any] }].chunks.map(convertChunk))
   }
