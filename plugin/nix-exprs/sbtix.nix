@@ -37,7 +37,6 @@ let
         sbtixRepos = writeText "sbt-setup-template-repos" ''
         [repositories]
         ${concatStringsSep "\n  " repoDefs}
-        local
         '';
     in stdenv.mkDerivation (rec {
             name = "sbt-setup-template";
@@ -126,18 +125,28 @@ in rec {
                         # result from this copying operation.
                         copyFile (baseNameOf urlAttrs.path) (localBuildsRepo + "/" + urlAttrs.path)
                     else
-                      fetchurl urlAttrs;
+                      # Use standard sha256 attribute
+                      fetchurl { url = urlAttrs.url; sha256 = urlAttrs.sha256; };
                   hashBash =
                     if urlAttrs.type or null == "built"
                     then ''$(sha256sum "${artifact}" | cut -c -64)''
+                    # Use sha256 directly
                     else ''$(echo ${toLower urlAttrs.sha256} | tr / _)'';
+
+                  # Extract if this is a POM file
+                  isPom = (builtins.match ".*\\.pom$" outputPath) != null;
+                  
+                  # For POM files, we need to create symlinks in both the parent directory and artifact path
+                  pomLinks = if isPom then [
+                    ''ln -fsn "${artifact}" "$out/${outputPath}"''
+                  ] else [];
                 in
                 [ ''mkdir -p "$out/${parentDirs outputPath}"''
                   ''ln -fsn "${artifact}" "$out/${outputPath}"''
                   # TODO: include the executable bit as a suffix of the hash.
                   #       Shouldn't matter in our use case though.
                   ''ln -fsn "${artifact}" "$out/cas/${hashBash}"''
-                ];
+                ] ++ pomLinks;
         in
             ''
               mkdir -p $out/cas
@@ -147,8 +156,18 @@ in rec {
         let
             repoPatternOptional = repoPattern:
                 optionalString (repoPattern != "") ", ${repoPattern}";
+            
+            # Add explicit pattern for Maven repos to handle POM files correctly
+            mavenPattern = "[organization]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]";
+            
             repoPath = repoName: repoPattern:
-                [ "${name}-${repoName}: file://${nixrepo}/${repoName}${repoPatternOptional repoPattern}" ];
+                let 
+                  # Use Maven pattern for public repos
+                  pattern = if repoName == "public" 
+                           then mavenPattern
+                           else repoPattern;
+                in
+                [ "${name}-${repoName}: file://${nixrepo}/${repoName}/${repoPatternOptional pattern}" ];
         in
             concatLists (mapAttrsToList repoPath repos);
 
@@ -172,7 +191,7 @@ in rec {
 
           repoDefs = (repoConfig { inherit repos nixrepo name; }) ++ (
             if (localBuildsRepo == "") then [] else [
-              "sbtix-local-maven-dependencies: file://${localBuildsRepo}"
+              "sbtix-local-maven-dependencies: file://${localBuildsRepo}, ${mavenPattern}"
               "sbtix-local-ivy-dependencies: file://${localBuildsRepo}, ${ivyRepoPattern}"
             ]);
 
@@ -191,8 +210,10 @@ in rec {
           sbtixRepos = writeText "${name}-repos" ''
             [repositories]
               ${concatStringsSep "\n  " repoDefs}
-            local
             '';
+            
+          # Define Maven pattern for consistency
+          mavenPattern = "[organization]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]";
 
       in stdenv.mkDerivation (rec {
             dontPatchELF      = true;
@@ -210,14 +231,33 @@ in rec {
               -Dsbt.global.staging=./.staging
               -Dsbt.override.build.repos=true
               -Dsbt.repository.config=${sbtixRepos}
+              -Dsbt.offline=true
               ${sbtOptions}
             '';
 
             buildPhase = ''
               runHook preBuild
 
-              pwd && sbt ++${scalaVersion} compile
+              export COURSIER_CACHE=$(pwd)/.coursier-cache
+              export SBT_OPTS="${sbtOptions} -Dsbt.ivy.home=./.ivy2-home -Dsbt.boot.directory=./.sbt-boot -Dcoursier.cache=./.coursier-cache"
+              localHome="$(pwd)/.sbt-home"
+              localCache="$localHome/.cache"
+              mkdir -p "$localHome" "$localCache"
+              export SBT_OPTS="$SBT_OPTS -Duser.home=$localHome"
+              export HOME="$localHome"
+              export XDG_CACHE_HOME="$localCache"
 
+              # Setup local directory for plugin
+              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/jars
+              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/ivys
+              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/poms
+
+              # Copy JAR if it exists in the src directory (for scripted tests)
+              if [ -f ./sbtix-plugin-under-test.jar ]; then
+                cp ./sbtix-plugin-under-test.jar ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/jars/sbtix.jar
+              fi
+
+              sbt compile
               runHook postBuild
             '';
 
@@ -266,7 +306,11 @@ in rec {
         installPhase = ''
           runHook preInstall
 
-          sbt ++${scalaVersion} publishLocal
+          localHome="$(pwd)/.sbt-home"
+          localCache="$localHome/.cache"
+          mkdir -p "$localHome" "$localCache"
+          export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
+          HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
           cp ./.ivy2/local/* $out/ -r
 
@@ -278,7 +322,11 @@ in rec {
         installPhase = ''
           runHook preInstall
 
-          sbt stage
+          localHome="$(pwd)/.sbt-home"
+          localCache="$localHome/.cache"
+          mkdir -p "$localHome" "$localCache"
+          export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
+          HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage
           mkdir -p $out/
           cp target/universal/stage/* $out/ -r
           for p in $(find $out/bin/* -executable); do

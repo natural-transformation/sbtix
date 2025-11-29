@@ -1,44 +1,43 @@
 package se.nullable.sbtix
 
 import sbt._
-import sbt.ProjectRef
-import sbt.{Logger, ModuleID, Resolver, PatternsBasedRepository}
 
-object NixResolver {
-
-  def resolve(resolver: Resolver) = {
-    val nixResolver = resolver match {
-      case ivy: PatternsBasedRepository =>
-        val pat      = ivy.patterns.artifactPatterns.head
-        val endIndex = pat.indexOf("[")
-        val root     = pat.substring(0, endIndex)
-        val pattern  = pat.substring(endIndex)
-        NixResolver(ivy.name, root, Some(pattern))
-      case mvn: MavenRepository => NixResolver(mvn.name, mvn.root, None)
-      case cr: ChainedResolver  => ???
-      case raw: RawRepository   => ???
-    }
-
-    nixResolver
-  }
+/**
+ * Resolves repositories to Nix expressions
+ */
+trait NixResolver {
+  def nixRepo: NixRepo
 }
 
-case class NixResolver(private val name: String, rootUrl: String, pattern: Option[String]) {
-  private val repoName = "nix-" + name
+/**
+ * Simple implementation of NixResolver
+ */
+case class SimpleNixResolver(name: String, repo: NixRepo) extends NixResolver {
+  override def nixRepo: NixRepo = repo
+}
 
-  private def isMatch(urlString: String) = urlString.startsWith(rootUrl)
-  private val nixRepo                    = NixRepo(repoName, pattern)
-  private val finder                     = new FindArtifactsOfRepo(repoName, rootUrl)
-
-  def filterArtifacts(logger: Logger, modules: Set[GenericModule]): Option[(NixRepo, Set[NixArtifact])] =
-    modules.filter(m => isMatch(m.url.toString)) match {
-      case mods if mods.isEmpty => None
-      case mods                 => Some((nixRepo, finder.findArtifacts(logger, mods)))
+/**
+ * Contains utility methods for creating NixResolvers
+ */
+object NixResolver {
+  /**
+   * Converts an SBT Resolver to a NixResolver
+   */
+  def fromSbtResolver(resolver: Resolver): NixResolver = {
+    resolver match {
+      case repo: MavenRepository =>
+        val name = cleanName(repo.name)
+        SimpleNixResolver(name, NixRepo(name, repo.root))
+      case _ =>
+        val name = cleanName(resolver.name)
+        SimpleNixResolver(name, NixRepo(name))
     }
-
-  def filterMetaArtifacts(logger: Logger, metaArtifacts: Set[MetaArtifact]): Option[(NixRepo, Set[NixArtifact])] =
-    metaArtifacts.filter(m => isMatch(m.artifactUrl)) match {
-      case mods if mods.isEmpty => None
-      case metas                => Some((nixRepo, finder.findMetaArtifacts(logger, metas)))
-    }
+  }
+  
+  /**
+   * Clean a repository name for use in Nix
+   */
+  def cleanName(name: String): String = {
+    name.replaceAll("[^a-zA-Z0-9._-]", "_")
+  }
 }

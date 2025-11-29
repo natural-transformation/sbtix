@@ -1,11 +1,28 @@
+# Test to verify the plugin works with Coursier 2.1.17
 > compile
-> genNix
-> genComposition
-> reload plugins
-> genNix
+> sbtixGenerate
 $ exists repo.nix
 $ exists project/repo.nix
-$ exec nix-build --show-trace -j32
-$ exec result/bin/three
+# Compare with expected output
 $ must-mirror repo.nix expected/repo.nix
 $ must-mirror project/repo.nix expected/project-repo.nix
+
+# Generate the default.nix for building
+> genComposition
+$ exists default.nix
+
+# Run nix-build to verify the whole build works with Coursier 2.1.17 compatibility
+$ exec rm -rf result
+$ exec nix-build
+$ exists result
+
+# Verify the default.nix contains the correct symlink strategy for Coursier 2.1.17 compatibility
+$ exec expected/ivy-file-test.sh default.nix
+
+# Test the generated executable
+$ exec result/bin/three
+
+# Note: Full nix-build testing can be done manually in a Nix environment:
+# $ exec rm -rf result
+# $ exec nix-build
+# $ exists result

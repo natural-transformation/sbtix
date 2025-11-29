@@ -25,8 +25,8 @@ in pkgs.stdenv.mkDerivation {
 
   setupPhase = ''
     mkdir -p project
-    echo "sbt.version=1.10.7" > ./project/build.properties
-    echo "[NIX_BUILD_DEBUG] Created project/build.properties with sbt.version=1.10.7"
+    echo "sbt.version={{SBT_BUILD_VERSION}}" > ./project/build.properties
+    echo "[NIX_BUILD_DEBUG] Created project/build.properties with sbt.version={{SBT_BUILD_VERSION}}"
   '';
 
   buildPhase = ''
@@ -38,7 +38,7 @@ in pkgs.stdenv.mkDerivation {
     export SBT_OPTS="$SBT_OPTS -Dsbt.ivy.home=$(pwd)/.ivy2-home"
     export SBT_OPTS="$SBT_OPTS -Dsbt.boot.directory=$(pwd)/.sbt-boot"
     export SBT_OPTS="$SBT_OPTS -Dcoursier.cache=$(pwd)/.coursier-cache"
-    export SBT_OPTS="$SBT_OPTS -Dplugin.version=0.4-SNAPSHOT"
+    export SBT_OPTS="$SBT_OPTS -Dplugin.version={{PLUGIN_VERSION}}"
     export SBT_OPTS="$SBT_OPTS -Dsbtix.debug=true"
 
     localHome="$(pwd)/.sbt-home"
@@ -48,11 +48,11 @@ in pkgs.stdenv.mkDerivation {
     export HOME="$localHome"
     export XDG_CACHE_HOME="$localCache"
 
-    echo "[NIX_BUILD_DEBUG] Setting up local Ivy repository for sbtix plugin version 0.4-SNAPSHOT"
+    echo "[NIX_BUILD_DEBUG] Setting up local Ivy repository for sbtix plugin version {{PLUGIN_VERSION}}"
 
     # Define ivyDir with explicitly absolute path for consistent behavior
-    # IMPORTANT: Never use $ivyDir which breaks Nix variable interpolation
-    ivyDir="$(pwd)/.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.4-SNAPSHOT"
+    # IMPORTANT: Never use ${IVY_LOCAL_BASE} which breaks Nix variable interpolation
+    ivyDir="$(pwd)/.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/{{PLUGIN_VERSION}}"
 
     # Create local directories for Ivy repositories
     mkdir -p $ivyDir/jars
@@ -62,56 +62,21 @@ in pkgs.stdenv.mkDerivation {
     echo "[NIX_BUILD_DEBUG] Copying sbtix-plugin-under-test.jar to the ivy jar directory"
     cp ./sbtix-plugin-under-test.jar $ivyDir/jars/sbtix.jar
 
-    echo "[NIX_BUILD_DEBUG] Writing POM to $ivyDir/poms/sbtix-0.4-SNAPSHOT.pom"
-    cat <<POM_EOF > $ivyDir/poms/sbtix-0.4-SNAPSHOT.pom
-<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>se.nullable.sbtix</groupId>
-  <artifactId>sbtix</artifactId>
-  <version>0.4-SNAPSHOT</version>
-  <name>sbtix Plugin</name>
-  <description>Locally provided sbtix plugin for Nix build</description>
-  <packaging>jar</packaging>
-</project>
+    echo "[NIX_BUILD_DEBUG] Writing POM to $ivyDir/poms/sbtix-{{PLUGIN_VERSION}}.pom"
+    cat <<POM_EOF > $ivyDir/poms/sbtix-{{PLUGIN_VERSION}}.pom
+{{POM_XML}}
 POM_EOF
 
     # Generate the Ivy XML files for compatibility with both Coursier versions
     # Step 1: Create the primary ivy.xml file first (for Coursier >= 2.1.17)
     echo "[NIX_BUILD_DEBUG] Writing primary ivy.xml file for Coursier 2.1.17+"
     cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
-<ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
-  <info organisation="se.nullable.sbtix"
-        module="sbtix"
-        revision="0.4-SNAPSHOT"
-        status="release"
-        publication="1764442108298"
-        e:sbtVersion="1.0"
-        e:scalaVersion="2.12">
-    <description>
-      sbtix plugin (locally provided for Nix build)
-    </description>
-  </info>
-  <configurations>
-    <conf name="compile" visibility="public" description=""/>
-    <conf name="default" visibility="public" description="" extends="compile"/>
-    <conf name="master" visibility="public" description=""/>
-    <conf name="provided" visibility="public" description=""/>
-    <conf name="runtime" visibility="public" description="" extends="compile"/>
-    <conf name="sources" visibility="public" description=""/>
-    <conf name="test" visibility="public" description="" extends="runtime"/>
-  </configurations>
-  <publications>
-    <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
-    <artifact name="sbtix" type="src" ext="jar" conf="sources" e:classifier="sources"/>
-  </publications>
-  <dependencies></dependencies>
-</ivy-module>
+{{IVY_XML}}
 IVY_EOF
 
     # Step 2: Create the ivy-version.xml symlink (for Coursier <= 2.1.16 backward compatibility)
-    echo "[NIX_BUILD_DEBUG] Creating ivy-0.4-SNAPSHOT.xml symlink for Coursier 2.1.16 and earlier compatibility"
-    ln -sf ivy.xml "$ivyDir/ivys/ivy-0.4-SNAPSHOT.xml"
+    echo "[NIX_BUILD_DEBUG] Creating ivy-{{PLUGIN_VERSION}}.xml symlink for Coursier 2.1.16 and earlier compatibility"
+    ln -sf ivy.xml "$ivyDir/ivys/ivy-{{PLUGIN_VERSION}}.xml"
 
     echo "[NIX_BUILD_DEBUG] Files in Ivy repo:"
     ls -R $ivyDir

@@ -1,3 +1,3 @@
 object MainThree extends App {
-  println("hey!")
+  println("Hello from subproject three!")
 }

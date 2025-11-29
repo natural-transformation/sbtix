@@ -35,6 +35,30 @@ scriptedLaunchOpts ++= Seq(
 )
 scriptedBufferLog := false
 
+// Explicitly set the sbt version for scripted tests
+scriptedSbt := sbtVersion.value
+
+// Ensure the sbtix plugin JAR is copied into the test project source before scripted tests run
+scriptedDependencies := {
+  val log = streams.value.log
+  log.info("[SBTIX_PRE_SCRIPTED] scriptedDependencies starting...")
+  val sbtixPluginJar = (Compile / packageBin).value // Get the packaged sbtix plugin JAR
+  log.info(s"[SBTIX_PRE_SCRIPTED] Source plugin JAR: ${sbtixPluginJar.getAbsolutePath}, Exists: ${sbtixPluginJar.exists()}")
+
+  // Path to the specific scripted test project's source directory
+  // This copies it into src/sbt-test/sbtix/simple/, and scripted will then copy this to the temp test dir.
+  val testProjectSourceDir = baseDirectory.value / "src" / "sbt-test" / "sbtix" / "simple"
+  val targetJarInTestProjectSource = testProjectSourceDir / "sbtix-plugin-under-test.jar"
+  log.info(s"[SBTIX_PRE_SCRIPTED] Target in test source: ${targetJarInTestProjectSource.getAbsolutePath}")
+
+  IO.createDirectory(testProjectSourceDir) // Ensure the directory exists
+  IO.copyFile(sbtixPluginJar, targetJarInTestProjectSource, preserveLastModified = true)
+  log.info(s"[SBTIX_PRE_SCRIPTED] Copied JAR. Target exists: ${targetJarInTestProjectSource.exists()}")
+}
+
+// Explicitly make scripted depend on packageBin of the current project (sbtix plugin)
+scripted := scripted.dependsOn(Compile / packageBin).evaluated
+
 publishMavenStyle := false
 
 Compile / packageBin / publishArtifact := true
@@ -50,6 +74,8 @@ Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
 scalafmtOnCompile := false
 
 libraryDependencies ++= Seq(
-  "io.get-coursier" %% "coursier" % "2.1.16",
-  "io.get-coursier" %% "coursier-sbt-maven-repository" % "2.1.16"
+  "io.get-coursier" %% "coursier" % "2.1.24",
+  "io.get-coursier" %% "coursier-sbt-maven-repository" % "2.1.24",
+  "com.lihaoyi" %% "upickle" % "3.1.3",
+  "org.scalatest" %% "scalatest" % "3.2.18" % Test
 )
