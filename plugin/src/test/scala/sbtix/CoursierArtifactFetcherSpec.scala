@@ -64,15 +64,19 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     val fetcher = new CoursierArtifactFetcher(
       mockLogger, 
       resolvers,
-      Set.empty
+      Set.empty,
+      "2.12.20",
+      "2.12"
     )
     
     // Call the fetcher
-    val (repos, artifacts) = fetcher(dependencies)
+        val (repos, artifacts, provided, errors) = fetcher(dependencies)
     
     // Verify the results
     repos should not be empty
     artifacts should not be empty
+        errors.flatMap(_.errors) shouldBe empty
+        provided shouldBe empty
     
     // Print some debug info
     println(s"Repositories: ${repos.size}")

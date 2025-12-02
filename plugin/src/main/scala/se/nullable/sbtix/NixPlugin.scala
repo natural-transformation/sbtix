@@ -46,22 +46,25 @@ object NixPlugin extends AutoPlugin {
     // Generate the repo file for normal dependencies
     val task = genNixProject := {
       // Find managed dependencies (from Maven or Ivy repositories)
-      val managedDependencies = Classpaths
+        val managedDependencies = Classpaths
         .managedJars(Compile, classpathTypes.value, update.value)
         .flatMap { 
-          case f: Attributed[File] => f.get(Keys.moduleID.key).map(Dependency(_))
+            case f: Attributed[File] => f.get(Keys.moduleID.key).map(Dependency(_))
         }
         .toSet
+        state.log.info(s"[SBTIX_DEBUG] Managed deps for genNixProject: ${managedDependencies.size}")
       val scalaVer = scalaVersion.value
       val sbtVer = sbtVersion.value
 
-      val fetcher = new CoursierArtifactFetcher(
-        state.log,
-        (Compile / externalResolvers).value.toSet,
-        (Compile / credentials).value.toSet
-      )
+          val fetcher = new CoursierArtifactFetcher(
+            state.log,
+            (Compile / externalResolvers).value.toSet,
+            (Compile / credentials).value.toSet,
+            scalaVersion.value,
+            scalaBinaryVersion.value
+          )
 
-      val (repos, artifacts) = fetcher(managedDependencies)
+      val (repos, artifacts, _, _) = fetcher(managedDependencies)
 
       // Write to file
       val repoFile = nixRepoFile.value

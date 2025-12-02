@@ -15,7 +15,7 @@
 }:
 
 let
-  sbtix = pkgs.callPackage ../../../plugin/nix-exprs/sbtix.nix {};
+  sbtix = pkgs.callPackage ./sbtix.nix {};
 in
   sbtix.buildSbtLibrary {
     name = "sbtix-multibuild-two";

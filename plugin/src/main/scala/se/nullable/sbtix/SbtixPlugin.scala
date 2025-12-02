@@ -61,6 +61,53 @@ object SbtixPlugin extends AutoPlugin {
 
   import autoImport._
   
+  private val nixExtraKeys = Set("nix", "e:nix")
+
+  private def logProvidedArtifacts(
+    log: Logger,
+    context: String,
+    provided: Set[ProvidedArtifact]
+  ): Unit = {
+    if (provided.nonEmpty) {
+      log.info(s"[SBTIX_DEBUG] Treating ${provided.size} artifacts as provided by sbtix-build-inputs during $context:")
+      provided.toSeq.sortBy(_.coordinates).foreach { artifact =>
+        log.info(s"  - ${artifact.coordinates} -> ${artifact.localPath}")
+      }
+    }
+  }
+
+  private def filterLockableModules(
+    modules: Iterable[ModuleID],
+    log: Logger,
+    context: String
+  ): Set[ModuleID] = {
+    val (skipped, kept) = modules.partition(hasNixMarker)
+    if (skipped.nonEmpty) {
+      log.debug(s"Skipping ${skipped.size} dependencies marked with `${nixExtraKeys.mkString(", ")}` in $context")
+    }
+    kept.toSet
+  }
+
+  private def hasNixMarker(moduleId: ModuleID): Boolean =
+    moduleId.extraAttributes.keys.exists(nixExtraKeys.contains)
+
+  private def logResolutionDiagnostics(
+    log: Logger,
+    context: String,
+    allErrors: Set[ResolutionErrors]
+  ): Unit = {
+    val flattened = allErrors.toSeq.flatMap(_.errors)
+    if (flattened.nonEmpty) {
+      log.warn(s"[SBTIX_DEBUG] Resolution issues encountered during $context:")
+      flattened.foreach { case ((module, version), messages) =>
+        val org    = module.organization.value
+        val name   = module.name.value
+        val details = if (messages.nonEmpty) messages.mkString(", ") else "unknown error"
+        log.warn(s"  - $org:$name:$version -> $details")
+      }
+    }
+  }
+  
   override def requires = JvmPlugin
   override def trigger = allRequirements
   
@@ -145,9 +192,13 @@ object SbtixPlugin extends AutoPlugin {
       log.info("Collecting build inputs for Nix...")
       
       val deps = Classpaths.managedJars(Compile, classpathTypes.value, update.value).toSet
-      val dependencies = deps.map { file =>
-        Dependency(file.get(moduleID.key).get)
-      }
+      val filteredModules =
+        filterLockableModules(
+          deps.flatMap(_.metadata.get(moduleID.key)),
+          log,
+          "sbtixBuildInputs"
+        )
+      val dependencies = filteredModules.map(Dependency(_))
       
       val projectResolvers = resolvers.value.toSet
       val fetchedCredentials = credentials.value.toSet
@@ -156,10 +207,18 @@ object SbtixPlugin extends AutoPlugin {
       
       log.info(s"Processing ${dependencies.size} dependencies from ${projectResolvers.size} resolvers")
       
-      val fetcher = new CoursierArtifactFetcher(log, projectResolvers, fetchedCredentials)
-      val (repos, artifacts) = fetcher(dependencies)
+      val fetcher = new CoursierArtifactFetcher(
+        log,
+        projectResolvers,
+        fetchedCredentials,
+        scalaVer,
+        scalaBinaryVersion.value
+      )
+      val (repos, artifacts, provided, errors) = fetcher(dependencies)
+      logProvidedArtifacts(log, "sbtixBuildInputs", provided)
+      logResolutionDiagnostics(log, "sbtixBuildInputs", errors)
       
-      BuildInputs(scalaVer, sbtVer, repos.toSeq, artifacts)
+      BuildInputs(scalaVer, sbtVer, repos.toSeq, artifacts, provided)
     },
     
     sbtixGenerate := {
@@ -169,7 +228,12 @@ object SbtixPlugin extends AutoPlugin {
       // Get all resolvers and dependencies
       val projectResolvers = externalResolvers.value.toSet
       val projectCredentials = credentials.value.toSet
-      val dependencies = (Compile / allDependencies).value.map(Dependency(_)).toSet
+      val dependencies =
+        filterLockableModules(
+          (Compile / allDependencies).value,
+          log,
+          "sbtixGenerate"
+        ).map(Dependency(_)).toSet
       val scalaVer = scalaVersion.value
       val sbtVer = sbtVersion.value
       
@@ -177,10 +241,14 @@ object SbtixPlugin extends AutoPlugin {
       val fetcher = new CoursierArtifactFetcher(
         log,
         projectResolvers,
-        projectCredentials
+        projectCredentials,
+        scalaVer,
+        scalaBinaryVersion.value
       )
 
-      val (repos, artifacts) = fetcher(dependencies)
+      val (repos, artifacts, provided, errors) = fetcher(dependencies)
+      logProvidedArtifacts(log, "sbtixGenerate", provided)
+      logResolutionDiagnostics(log, "sbtixGenerate", errors)
       
       // Generate the Nix expressions and write to files
       val currentBase = baseDirectory.value
@@ -219,7 +287,7 @@ object SbtixPlugin extends AutoPlugin {
       log.info(s"Wrote plugin repository definitions to ${projectRepoFile}")
       
       // Return build inputs for main dependencies
-      BuildInputs(scalaVer, sbtVer, repos.toSeq, artifacts)
+      BuildInputs(scalaVer, sbtVer, repos.toSeq, artifacts, provided)
     },
     
     sbtixGenerateFile := {
@@ -295,24 +363,42 @@ object SbtixPlugin extends AutoPlugin {
       val jarInPluginBuild = new File(pluginBuildDir, "sbtix-0.4-SNAPSHOT.jar")
       
       // Try all possible sources in order
-      val sourceJar = if (sourceJarInScriptedRoot != null && sourceJarInScriptedRoot.exists()) {
-        sourceJarInScriptedRoot
-      } else if (jarInCurrentDir.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in current dir: ${jarInCurrentDir.getAbsolutePath}")
-        jarInCurrentDir
-      } else if (jarInParentDir.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in parent dir: ${jarInParentDir.getAbsolutePath}")
-        jarInParentDir
-      } else if (jarInPluginBuild.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Using JAR from plugin build: ${jarInPluginBuild.getAbsolutePath}")
-        jarInPluginBuild
-      } else {
-        // Create a dummy JAR as last resort - the test will likely fail, but at least we can continue
-        log.warn(s"[SBTIX_DEBUG genComposition] No JAR found - creating a dummy JAR")
-        val dummyJar = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
-        IO.touch(dummyJar)
-        dummyJar
+      val codeSource = Option(getClass.getProtectionDomain.getCodeSource)
+      log.info(s"[SBTIX_DEBUG genComposition] Plugin code source: ${codeSource.map(_.getLocation).getOrElse("unknown")}")
+      val jarFromClasspath = codeSource
+        .map(_.getLocation.toURI)
+        .map(new File(_))
+      jarFromClasspath.filter(_.exists()).foreach { jar =>
+        log.info(s"[SBTIX_DEBUG genComposition] Using plugin JAR from classpath: ${jar.getAbsolutePath}")
       }
+
+      val sourceJar =
+        jarFromClasspath.filter(_.exists())
+          .orElse(Option(sourceJarInScriptedRoot).filter(_.exists()))
+          .orElse {
+            if (jarInCurrentDir.exists()) {
+              log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in current dir: ${jarInCurrentDir.getAbsolutePath}")
+              Some(jarInCurrentDir)
+            } else None
+          }
+          .orElse {
+            if (jarInParentDir.exists()) {
+              log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in parent dir: ${jarInParentDir.getAbsolutePath}")
+              Some(jarInParentDir)
+            } else None
+          }
+          .orElse {
+            if (jarInPluginBuild.exists()) {
+              log.info(s"[SBTIX_DEBUG genComposition] Using JAR from plugin build: ${jarInPluginBuild.getAbsolutePath}")
+              Some(jarInPluginBuild)
+            } else None
+          }
+          .getOrElse {
+            log.warn(s"[SBTIX_DEBUG genComposition] No JAR found - creating a dummy JAR")
+            val dummyJar = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
+            IO.touch(dummyJar)
+            dummyJar
+          }
       
       // Define the target location for the JAR within the Nix build's source directory
       val targetJarInNixSrc = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
@@ -446,6 +532,20 @@ object SbtixPlugin extends AutoPlugin {
       )
       val packagedSbtixNix = packagedSbtixCandidates.find(_.exists())
       val targetSbtixNix = new File(currentProjectBaseDir, "sbtix.nix")
+
+      def loadTemplateResource(candidates: Seq[String]): Option[(String, String)] =
+        candidates.toStream.flatMap { name =>
+          Option(getClass.getClassLoader.getResourceAsStream(name)).map { stream =>
+            val source = scala.io.Source.fromInputStream(stream)
+            try {
+              (source.mkString, name)
+            } finally {
+              source.close()
+              stream.close()
+            }
+          }
+        }.headOption
+
       try {
         if (expectedSbtixNix.exists()) {
           log.info(s"[SBTIX_DEBUG genComposition] Using expected sbtix.nix from ${expectedSbtixNix.getAbsolutePath}")
@@ -455,20 +555,14 @@ object SbtixPlugin extends AutoPlugin {
           log.info(s"[SBTIX_DEBUG genComposition] Copying packaged sbtix.nix from ${src.getAbsolutePath}")
           IO.copyFile(src, targetSbtixNix)
         } else {
-          val resourceStream = Option(getClass.getClassLoader.getResourceAsStream("sbtix.nix"))
-          resourceStream match {
-            case Some(stream) =>
-              log.info("[SBTIX_DEBUG genComposition] Extracting sbtix.nix from plugin resources")
-              val source = scala.io.Source.fromInputStream(stream)
-              try {
-                IO.write(targetSbtixNix, source.mkString)
-              } finally {
-                source.close()
-                stream.close()
-              }
+          val resourceCandidates = Seq("templates/sbtix.nix", "nix-exprs/sbtix.nix", "sbtix.nix")
+          loadTemplateResource(resourceCandidates) match {
+            case Some((content, name)) =>
+              log.info(s"[SBTIX_DEBUG genComposition] Extracting sbtix.nix ($name) from plugin resources")
+              IO.write(targetSbtixNix, content)
             case None =>
-              val searched = packagedSbtixCandidates.map(_.getAbsolutePath).mkString(", ")
-              log.warn(s"[SBTIX_DEBUG genComposition] Unable to locate sbtix.nix template. Looked in: $searched and classpath resources")
+              val searched = (packagedSbtixCandidates.map(_.getAbsolutePath) ++ resourceCandidates).mkString(", ")
+              log.warn(s"[SBTIX_DEBUG genComposition] Unable to locate sbtix.nix template. Looked in: $searched")
           }
         }
       } catch {
@@ -484,6 +578,23 @@ object SbtixPlugin extends AutoPlugin {
           log.info(s"[SBTIX_DEBUG genComposition] Injected plugin version $currentPluginVersion into ${targetSbtixNix.getAbsolutePath}")
           IO.write(targetSbtixNix, replaced)
         }
+
+        val refreshed = IO.read(targetSbtixNix)
+        val hasLocalRepoMarker = refreshed.contains("localBuildsRepo")
+        val hasCopyMarker = refreshed.contains("cp -RL ${localBuildsRepo}/.")
+        if (!hasLocalRepoMarker || !hasCopyMarker) {
+          val resourceCandidates = Seq("templates/sbtix.nix", "nix-exprs/sbtix.nix")
+          loadTemplateResource(resourceCandidates) match {
+            case Some((content, name)) =>
+              log.warn(s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name")
+              val updated = content.replace("""${plugin-version}""", currentPluginVersion)
+              IO.write(targetSbtixNix, updated)
+            case None =>
+              log.warn("[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file")
+          }
+        } else {
+          log.info("[SBTIX_DEBUG genComposition] sbtix.nix already contains modern local-repo wiring")
+        }
       }
 
       // Ensure manual-repo.nix is present (expected -> packaged -> fallback)
@@ -494,9 +605,13 @@ object SbtixPlugin extends AutoPlugin {
         new File(buildRootDir, "plugin/nix-exprs/manual-repo.nix")
       ).find(_.exists())
       def copyResource(resourceName: String, target: File): Boolean = {
-        val streamOpt = Option(getClass.getClassLoader.getResourceAsStream(resourceName))
+        val resourceCandidates = Seq(s"templates/$resourceName", s"nix-exprs/$resourceName", resourceName)
+        val streamOpt = resourceCandidates.toStream.flatMap { name =>
+          Option(getClass.getClassLoader.getResourceAsStream(name)).map(stream => (stream, name))
+        }.headOption
         streamOpt match {
-          case Some(stream) =>
+          case Some((stream, name)) =>
+            log.info(s"[SBTIX_DEBUG genComposition] Extracting $resourceName ($name) from plugin resources")
             val source = scala.io.Source.fromInputStream(stream)
             try {
               IO.write(target, source.mkString)

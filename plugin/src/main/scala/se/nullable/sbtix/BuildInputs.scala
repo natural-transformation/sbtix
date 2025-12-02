@@ -14,7 +14,8 @@ case class BuildInputs(
   scalaVersion: String,
   sbtVersion: String,
   nixRepositories: Seq[NixRepo],
-  nixArtifacts: Set[NixArtifact]
+  nixArtifacts: Set[NixArtifact],
+  providedArtifacts: Set[ProvidedArtifact] = Set.empty
 ) {
 
   /**

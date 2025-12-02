@@ -10,10 +10,12 @@ for f in {one,two,three}/{,project/}*repo.nix; do
 done
 
 pushd one
+sbt --error publishLocal
 sbtix-gen-all
 popd
 
 pushd two
+sbt --error publishLocal
 sbtix-gen-all
 popd
 

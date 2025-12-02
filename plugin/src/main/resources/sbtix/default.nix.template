@@ -50,8 +50,7 @@ in pkgs.stdenv.mkDerivation {
 
     echo "[NIX_BUILD_DEBUG] Setting up local Ivy repository for sbtix plugin version {{PLUGIN_VERSION}}"
 
-    # Define ivyDir with explicitly absolute path for consistent behavior
-    # IMPORTANT: Never use ${IVY_LOCAL_BASE} which breaks Nix variable interpolation
+    # Define ivyDir with explicitly absolute path for consistent behavior to keep Nix interpolation safe
     ivyDir="$(pwd)/.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/{{PLUGIN_VERSION}}"
 
     # Create local directories for Ivy repositories

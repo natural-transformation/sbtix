@@ -14,6 +14,21 @@ When you touch `plugin/src/main/resources/sbtix/default.nix.template`, regenerat
 
 and copying the resulting `default.nix` back into `expected/default.nix`. Repeat for any other scripted test that asserts on `default.nix` (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.
 
+### Updating the plugin's Nix lockfiles
+
+Whenever you change the plugin's dependencies (Coursier bumps, new libraries, etc.), regenerate the Nix locks under `plugin/` so the sandboxed builds stay reproducible:
+
+```bash
+# build the CLI from the current checkout
+nix build '.#sbtix'
+
+cd plugin
+../result/bin/sbtix genNix          # refreshes plugin/repo.nix and plugin/project/repo.nix
+../result/bin/sbtix genComposition  # refreshes plugin/default.nix if needed
+```
+
+Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes.
+
 ### Integration
 
 The `tests` directory contains further integration tests. Move
@@ -22,7 +37,9 @@ there.
 
 ```console
 nix develop    # load the NIX_PATH and other dependencies
-nix shell .    # build sbtix and add it to PATH
+# nix shell .    # build sbtix and add it to PATH
+nix build '.#sbtix'
+export PATH="$PWD/result/bin:$PATH"
 ./tests/multi-build/run.sh
 ./tests/template-generation/run.sh
 ```

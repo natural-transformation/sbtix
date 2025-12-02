@@ -189,11 +189,16 @@ in rec {
           repos = mergeAttr "repos" repo;
           nixrepo = mkRepo "${name}-repo" artifacts localBuildsRepo;
 
+          localRepoEntry = "local";
+          remoteDefaults = [
+            "maven-central"
+            "typesafe-ivy-releases: https://repo.typesafe.com/typesafe/ivy-releases/, ${ivyRepoPattern}"
+          ];
           repoDefs = (repoConfig { inherit repos nixrepo name; }) ++ (
             if (localBuildsRepo == "") then [] else [
               "sbtix-local-maven-dependencies: file://${localBuildsRepo}, ${mavenPattern}"
               "sbtix-local-ivy-dependencies: file://${localBuildsRepo}, ${ivyRepoPattern}"
-            ]);
+            ]) ++ [ localRepoEntry ] ++ remoteDefaults;
 
           # This takes a couple of seconds, but only needs to run when dependencies have changed.
           # It's probably near-instantaneous if done in, say, python.
@@ -239,7 +244,8 @@ in rec {
               runHook preBuild
 
               export COURSIER_CACHE=$(pwd)/.coursier-cache
-              export SBT_OPTS="${sbtOptions} -Dsbt.ivy.home=./.ivy2-home -Dsbt.boot.directory=./.sbt-boot -Dcoursier.cache=./.coursier-cache"
+              baseSbtOpts="''${SBT_OPTS:-}"
+              export SBT_OPTS="$baseSbtOpts ${sbtOptions} -Dsbt.ivy.home=./.ivy2-home -Dsbt.boot.directory=./.sbt-boot -Dcoursier.cache=./.coursier-cache"
               localHome="$(pwd)/.sbt-home"
               localCache="$localHome/.cache"
               mkdir -p "$localHome" "$localCache"
@@ -256,6 +262,20 @@ in rec {
               if [ -f ./sbtix-plugin-under-test.jar ]; then
                 cp ./sbtix-plugin-under-test.jar ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/jars/sbtix.jar
               fi
+
+              echo "[SBTIX_NIX_DEBUG] localBuildsRepo='${localBuildsRepo}'"
+              if [ -n "${localBuildsRepo}" ]; then
+                mkdir -p ./.ivy2-home/local
+                cp -RL ${localBuildsRepo}/. ./.ivy2-home/local/
+                chmod -R u+w ./.ivy2-home/local
+                echo "[SBTIX_NIX_DEBUG] Contents of ./.ivy2-home/local (depth 3):"
+                find ./.ivy2-home/local -maxdepth 3 -mindepth 1 -print
+              else
+                echo "[SBTIX_NIX_DEBUG] No localBuildsRepo provided"
+              fi
+
+              echo "[SBTIX_NIX_DEBUG] sbtixRepos configuration:"
+              cat ${sbtixRepos}
 
               sbt compile
               runHook postBuild
@@ -312,7 +332,12 @@ in rec {
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
           HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
-          cp ./.ivy2/local/* $out/ -r
+          localIvyDir="./.ivy2-home/local"
+          if [ -d "$localIvyDir" ]; then
+            cp -r "$localIvyDir/." $out/
+          else
+            echo "warning: expected Ivy cache at $localIvyDir but it was not created" 1>&2
+          fi
 
           runHook postInstall
         '';
@@ -328,7 +353,7 @@ in rec {
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
           HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage
           mkdir -p $out/
-          cp target/universal/stage/* $out/ -r
+          cp -r target/universal/stage/* $out/
           for p in $(find $out/bin/* -executable); do
             wrapProgram "$p" --prefix PATH : ${jre}/bin --prefix PATH : ${gawk}/bin
           done

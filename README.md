@@ -38,11 +38,11 @@ To install sbtix either:
 nix shell github:natural-transformation/sbtix
 ```
 
-Or clone the sbtix git repo and:
+Or, from this repository:
 
 ```bash
-cd sbtix
-nix-env -f . -i sbtix
+nix build '.#sbtix'
+./result/bin/sbtix --help
 ```
 
 sbtix provides a number of scripts to generate and update Nix expressions to fetch your dependencies and build your sbt project. These scripts work by opening your project in sbt and loading an additional sbtix plugin (via the `sbt.global.base` directory to `$HOME/.sbtix`). After generation, you don't need the sbtix command-line tools to actually build your project from nix.
@@ -58,6 +58,8 @@ sbtix provides a number of scripts to generate and update Nix expressions to fet
 
  * run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `default.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is unless you need custom behaviour.
  * if you do need to hand-roll the derivation, the snippet below shows how to call `sbtix.buildSbtProgram` directly. (Use `buildSbtLibrary` if you are packaging a library or `buildSbtProject` for a custom `installPhase`.)
+
+If you want a starting point, copy `default.nix.example` from this repository into your project and adapt it. The root-level `default.nix` now just raises an error so it no longer looks like part of the build.
 
 ```nix
 { pkgs ? import <nixpkgs> {} }: with pkgs;

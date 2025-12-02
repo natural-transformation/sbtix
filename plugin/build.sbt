@@ -56,8 +56,8 @@ scriptedDependencies := {
   log.info(s"[SBTIX_PRE_SCRIPTED] Copied JAR. Target exists: ${targetJarInTestProjectSource.exists()}")
 }
 
-// Explicitly make scripted depend on packageBin of the current project (sbtix plugin)
-scripted := scripted.dependsOn(Compile / packageBin).evaluated
+// Ensure scripted runs with the freshly published plugin in the local Ivy cache
+scripted := scripted.dependsOn(publishLocal).evaluated
 
 publishMavenStyle := false
 
@@ -69,7 +69,18 @@ Compile / packageDoc / publishArtifact := false
 
 Compile / packageSrc / publishArtifact := false
 
-Compile / unmanagedResourceDirectories += baseDirectory.value / "nix-exprs"
+Compile / resourceGenerators += Def.task {
+  val base = baseDirectory.value / "nix-exprs"
+  val managed = (Compile / resourceManaged).value / "templates"
+  IO.createDirectory(managed)
+  val files = Seq("sbtix.nix", "manual-repo.nix")
+  files.map { name =>
+    val src = base / name
+    val dest = managed / name
+    IO.copyFile(src, dest)
+    dest
+  }
+}
 
 scalafmtOnCompile := false
 

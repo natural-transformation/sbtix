@@ -13,20 +13,26 @@
         ./tests/flake-module.nix
       ];
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
-      perSystem = { config, self', inputs', pkgs, system, ... }: {
-        packages.default = import ./default.nix { inherit pkgs; };
+      perSystem = { pkgs, ... }:
+        let
+          sbtixPackage = pkgs.callPackage ./sbtix-tool.nix { };
+        in {
+          packages = {
+            sbtix = sbtixPackage;
+            default = sbtixPackage;
+          };
 
-        devShells.default = pkgs.mkShell {
-          nativeBuildInputs = [
-            pkgs.sbt
+          devShells.default = pkgs.mkShell {
+            nativeBuildInputs = [
+              pkgs.sbt
 
-            # See CONTRIBUTING.md
-            pkgs.hci
-          ];
-          # TODO: Don't rely on NIX_PATH in tests.
-          NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
+              # See CONTRIBUTING.md
+              pkgs.hci
+            ];
+            # TODO: Don't rely on NIX_PATH in tests.
+            NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
+          };
         };
-      };
       herculesCI = {
         ciSystems = [ "x86_64-linux" "aarch64-linux" ];
       };

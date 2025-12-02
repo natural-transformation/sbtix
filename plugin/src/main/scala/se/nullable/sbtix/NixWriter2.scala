@@ -37,7 +37,10 @@ object NixWriter2 {
     
     // Artifacts section
     builder.append("  \"artifacts\" = {\n")
-    val sortedArtifacts = artifacts.toSeq.sortBy(a => (a.repoName, a.relativePath))
+    val sortedArtifacts =
+      artifacts.toSeq
+        .filterNot(_.url.startsWith("file:"))
+        .sortBy(a => (a.repoName, a.relativePath))
     if (sortedArtifacts.nonEmpty) {
       builder.append(sortedArtifacts.map(_.toNix).mkString("\n"))
       builder.append("\n")

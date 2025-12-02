@@ -14,7 +14,7 @@
 }:
 
 let
-  sbtix = pkgs.callPackage ../../../plugin/nix-exprs/sbtix.nix {};
+  sbtix = pkgs.callPackage ./sbtix.nix {};
 in
   sbtix.buildSbtProgram {
     name = "sbtix-multibuild-three";
