@@ -7,7 +7,7 @@ object CompositionWriter {
          |# this file originates from SBTix
          |{ pkgs ? import <nixpkgs> {}
          |, cleanSource ? pkgs.lib.cleanSource
-         |, gitignore ? (let
+         |, gitignoreLib ? (let
          |                 src = pkgs.fetchFromGitHub { 
          |                   owner = "hercules-ci";
          |                   repo = "gitignore.nix";
@@ -22,7 +22,7 @@ object CompositionWriter {
          |in
          |  sbtix.buildSbt${compositionType.capitalize} {
          |    name = "$buildName";
-         |    src = cleanSource (gitignore.gitignoreSource ./.);
+         |    src = cleanSource (gitignoreLib.gitignoreSource ./.);
          |    #sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix { inherit pkgs; };
          |    repo = [
          |      (import ./repo.nix)

@@ -70,12 +70,15 @@ Compile / packageDoc / publishArtifact := false
 Compile / packageSrc / publishArtifact := false
 
 Compile / resourceGenerators += Def.task {
-  val base = baseDirectory.value / "nix-exprs"
+  val base = baseDirectory.value
   val managed = (Compile / resourceManaged).value / "templates"
   IO.createDirectory(managed)
-  val files = Seq("sbtix.nix", "manual-repo.nix")
-  files.map { name =>
-    val src = base / name
+  val files = Seq(
+    "sbtix.nix" -> (base / "nix-exprs" / "sbtix.nix"),
+    "manual-repo.nix" -> (base / "nix-exprs" / "manual-repo.nix"),
+    "sbtix-plugin-repo.nix" -> (base / "repo.nix")
+  )
+  files.map { case (name, src) =>
     val dest = managed / name
     IO.copyFile(src, dest)
     dest

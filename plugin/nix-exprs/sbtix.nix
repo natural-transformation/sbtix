@@ -176,17 +176,24 @@ in rec {
     mergeAttr = attr: repo:
         fold (a: b: a // b) {} (catAttrs attr repo);
 
-    buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? "", sbtOptions ? "", ...}:
+    buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? "", sbtOptions ? "", pluginBootstrap ? "", ...}:
       let
+          pluginRepoPath = ./sbtix-plugin-repo.nix;
+          pluginRepos =
+            if builtins.pathExists pluginRepoPath then
+              [ (import pluginRepoPath) ]
+            else
+              [];
+          mergedRepo = repo ++ pluginRepos;
           localBuildsRepo =
             if builtins.typeOf sbtixBuildInputs == "list" then
               abort "Update notice: see the sbtix README to learn how to use 'sbtixBuildInputs'"
             else
               sbtixBuildInputs;
-          versionings = unique (flatten (catAttrs "versioning" repo));
+          versionings = unique (flatten (catAttrs "versioning" mergedRepo));
           scalaVersion = (builtins.head versionings).scalaVersion;
-          artifacts = mergeAttr "artifacts" repo;
-          repos = mergeAttr "repos" repo;
+          artifacts = mergeAttr "artifacts" mergedRepo;
+          repos = mergeAttr "repos" mergedRepo;
           nixrepo = mkRepo "${name}-repo" artifacts localBuildsRepo;
 
           localRepoEntry = "local";
@@ -254,14 +261,7 @@ in rec {
               export XDG_CACHE_HOME="$localCache"
 
               # Setup local directory for plugin
-              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/jars
-              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/ivys
-              mkdir -p ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/poms
-
-              # Copy JAR if it exists in the src directory (for scripted tests)
-              if [ -f ./sbtix-plugin-under-test.jar ]; then
-                cp ./sbtix-plugin-under-test.jar ./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${plugin-version}/jars/sbtix.jar
-              fi
+              ${pluginBootstrap}
 
               echo "[SBTIX_NIX_DEBUG] localBuildsRepo='${localBuildsRepo}'"
               if [ -n "${localBuildsRepo}" ]; then
@@ -353,7 +353,27 @@ in rec {
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
           HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage
           mkdir -p $out/
-          cp -r target/universal/stage/* $out/
+          copied_any=0
+          copy_stage_root() {
+            local dir="$1"
+            if [ -d "$dir" ]; then
+              echo "[SBTIX_NIX_DEBUG] Copying staged application from $dir"
+              cp -r "$dir"/. $out/
+              copied_any=1
+            fi
+          }
+
+          copy_stage_root "target/universal/stage"
+          while IFS= read -r stageDir; do
+            if [ -n "$stageDir" ] && [ "$stageDir" != "target/universal/stage" ]; then
+              copy_stage_root "$stageDir"
+            fi
+          done < <(find . -path '*/target/universal/stage' -type d)
+
+          if [ $copied_any -eq 0 ]; then
+            echo "error: no staged artifacts found. Ensure sbt-native-packager is enabled or override sbtix.buildSbtProgram." 1>&2
+            exit 1
+          fi
           for p in $(find $out/bin/* -executable); do
             wrapProgram "$p" --prefix PATH : ${jre}/bin --prefix PATH : ${gawk}/bin
           done

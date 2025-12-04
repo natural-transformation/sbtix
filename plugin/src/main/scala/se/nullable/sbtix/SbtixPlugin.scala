@@ -38,6 +38,93 @@ object SbtixPlugin extends AutoPlugin {
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val DefaultNixTemplateResource = "/sbtix/default.nix.template"
   
+  private def indentMultiline(text: String, indent: String): String =
+    text.linesIterator.map(line => indent + line).mkString("\n")
+
+  /** Builds the Maven POM fragment that `Coursier` expects for the locally staged
+    * plugin jar. We emit it directly instead of calling `publishLocal` because the
+    * Nix derivation runs before any sbt process is available inside the sandbox.
+    */
+  private def pluginPomXml(version: String): String =
+    s"""<project xmlns="http://maven.apache.org/POM/4.0.0"
+       |         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       |         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+       |  <modelVersion>4.0.0</modelVersion>
+       |  <groupId>se.nullable.sbtix</groupId>
+       |  <artifactId>sbtix</artifactId>
+       |  <version>$version</version>
+       |  <name>sbtix Plugin</name>
+       |  <description>Locally provided sbtix plugin for Nix build</description>
+       |  <packaging>jar</packaging>
+       |</project>""".stripMargin
+
+  /** Emits the companion Ivy metadata used by the sbt launcher during bootstrap.
+    * The `publicationTimestamp` keeps the Ivy entry stable but deterministic, and
+    * we hard-code the SBT/Scala versions so that template updates happen together
+    * with the plugin build definition.
+    */
+  private def pluginIvyXml(version: String, publicationTimestamp: String): String =
+    s"""<ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
+       |  <info organisation="se.nullable.sbtix"
+       |        module="sbtix"
+       |        revision="$version"
+       |        status="release"
+       |        publication="$publicationTimestamp"
+       |        e:sbtVersion="1.0"
+       |        e:scalaVersion="2.12">
+       |    <description>
+       |      sbtix plugin (locally provided for Nix build)
+       |    </description>
+       |  </info>
+       |  <configurations>
+       |    <conf name="compile" visibility="public" description=""/>
+       |    <conf name="default" visibility="public" description="" extends="compile"/>
+       |    <conf name="master" visibility="public" description=""/>
+       |    <conf name="provided" visibility="public" description=""/>
+       |    <conf name="runtime" visibility="public" description="" extends="compile"/>
+       |    <conf name="sources" visibility="public" description=""/>
+       |    <conf name="test" visibility="public" description="" extends="runtime"/>
+       |  </configurations>
+       |  <publications>
+       |    <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
+       |  </publications>
+       |  <dependencies></dependencies>
+       |</ivy-module>""".stripMargin
+
+  /** Shell snippet that runs inside the Nix build sandbox. It synthesizes a
+    * minimal Ivy repository entry under `.ivy2-home` so that Coursier can resolve
+    * the plugin JAR from the files we already staged in the derivation.
+    */
+  private def pluginBootstrapBody(version: String, timestamp: String): String = {
+    val pom = indentMultiline(pluginPomXml(version), "    ")
+    val ivy = indentMultiline(pluginIvyXml(version, timestamp), "    ")
+    s"""ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/$version"
+mkdir -p "$$ivyDir/jars" "$$ivyDir/ivys" "$$ivyDir/poms"
+if [ -f ./sbtix-plugin-under-test.jar ]; then
+  cp ./sbtix-plugin-under-test.jar $$ivyDir/jars/sbtix.jar
+  cat <<POM_EOF > $$ivyDir/poms/sbtix-$version.pom
+$pom
+POM_EOF
+  cat <<IVY_EOF > $$ivyDir/ivys/ivy.xml
+$ivy
+IVY_EOF
+  ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml
+fi"""
+  }
+
+  /** Indents the bootstrap script so it drops cleanly into the templated heredoc
+    * inside our Nix expressions.
+    */
+  private def pluginBootstrapSnippet(version: String, timestamp: String, indent: String): String =
+    indentMultiline(pluginBootstrapBody(version, timestamp), indent)
+
+  private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String): String = {
+    val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ")
+    raw
+      .replace("{{PLUGIN_BOOTSTRAP_SNIPPET}}", snippet)
+      .replace("""${plugin-version}""", pluginVersion)
+  }
+  
   object autoImport {
     // Main sbtix tasks
     val sbtix = taskKey[Unit]("Download dependencies and generate nix expressions")
@@ -121,55 +208,17 @@ object SbtixPlugin extends AutoPlugin {
 
   // Default implementation for the Nix content template
   // This version uses absolute paths for ivyDir to ensure compatibility with all environments
+  /** Replaces `default.nix` placeholders with versioned data plus the bootstrap
+    * snippet above. Keeping the string replacement here ensures every template
+    * consumer (scripted tests, `sbtix genComposition`, integration fixtures) sees
+    * the same content without rerunning extra tooling.
+    */
   private def defaultNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String): String = {
     val timestamp = System.currentTimeMillis().toString
-
-    val pomContent =
-      s"""<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
-         |        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-         |  <modelVersion>4.0.0</modelVersion>
-         |  <groupId>se.nullable.sbtix</groupId>
-         |  <artifactId>sbtix</artifactId>
-         |  <version>$currentPluginVersion</version>
-         |  <name>sbtix Plugin</name>
-         |  <description>Locally provided sbtix plugin for Nix build</description>
-         |  <packaging>jar</packaging>
-         |</project>""".stripMargin
-
-    val ivyContent =
-      s"""<ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
-         |  <info organisation="se.nullable.sbtix"
-         |        module="sbtix"
-         |        revision="$currentPluginVersion"
-         |        status="release"
-         |        publication="$timestamp"
-         |        e:sbtVersion="1.0"
-         |        e:scalaVersion="2.12">
-         |    <description>
-         |      sbtix plugin (locally provided for Nix build)
-         |    </description>
-         |  </info>
-         |  <configurations>
-         |    <conf name="compile" visibility="public" description=""/>
-         |    <conf name="default" visibility="public" description="" extends="compile"/>
-         |    <conf name="master" visibility="public" description=""/>
-         |    <conf name="provided" visibility="public" description=""/>
-         |    <conf name="runtime" visibility="public" description="" extends="compile"/>
-         |    <conf name="sources" visibility="public" description=""/>
-         |    <conf name="test" visibility="public" description="" extends="runtime"/>
-         |  </configurations>
-         |  <publications>
-         |    <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
-         |    <artifact name="sbtix" type="src" ext="jar" conf="sources" e:classifier="sources"/>
-         |  </publications>
-         |  <dependencies></dependencies>
-         |</ivy-module>""".stripMargin
-
     val replacements = Map(
       "{{SBT_BUILD_VERSION}}" -> sbtBuildVersion,
       "{{PLUGIN_VERSION}}" -> currentPluginVersion,
-      "{{POM_XML}}" -> pomContent,
-      "{{IVY_XML}}" -> ivyContent
+      "{{PLUGIN_BOOTSTRAP_SNIPPET}}" -> pluginBootstrapSnippet(currentPluginVersion, timestamp, "      ")
     )
 
     replacements.foldLeft(loadDefaultNixTemplate()) { case (acc, (token, value)) =>
@@ -420,6 +469,7 @@ object SbtixPlugin extends AutoPlugin {
       }
 
       val currentPluginVersion = sys.props.getOrElse("plugin.version", version.value)
+      val bootstrapTimestamp = System.currentTimeMillis().toString
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
       
       // Check if there's an expected default.nix file we should use
@@ -431,6 +481,8 @@ object SbtixPlugin extends AutoPlugin {
       
       // Use the template to generate the nixContent regardless of whether we'll use it or not
       val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
+      val templatedNixContent =
+        rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
       
       if (expectedDefaultNix.exists()) {
         // Use the expected default.nix for testing
@@ -438,7 +490,7 @@ object SbtixPlugin extends AutoPlugin {
         log.info(s"[SBTIX_DEBUG genComposition] Copying to target: ${nixFile.getAbsolutePath}")
         
         try {
-          val content = IO.read(expectedDefaultNix)
+            val content = IO.read(expectedDefaultNix)
           log.info(s"[SBTIX_DEBUG genComposition] Expected content has ${content.length} characters and begins with: ${content.take(50)}...")
           
           // Make sure there's no IVY_LOCAL_BASE in the content
@@ -456,15 +508,22 @@ object SbtixPlugin extends AutoPlugin {
           log.info(s"[SBTIX_DEBUG genComposition] Written content has ${writtenContent.length} characters")
           
           // Check for IVY_LOCAL_BASE in the file
+          val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
+          val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
+          val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
+          val legacyGitignoreCall =
+            writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
+            writtenContent.contains("cleanSource (gitignore ./.);")
+
           if (writtenContent.contains("IVY_LOCAL_BASE")) {
             log.error("[SBTIX_DEBUG genComposition] ERROR: The copied file still contains IVY_LOCAL_BASE references")
-            // Log the problematic part
             val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
             log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")
-            
-            // As a last resort, use our template-generated content
             log.info("[SBTIX_DEBUG genComposition] Falling back to using our clean template-generated content")
-            IO.write(nixFile, rawNixContent)
+            IO.write(nixFile, templatedNixContent)
+          } else if (missingPluginRepo || legacyBuildInputs || legacyGitignoreParam || legacyGitignoreCall) {
+            log.warn("[SBTIX_DEBUG genComposition] default.nix lacks sbtix bootstrap wiring (plugin repo, optional build-inputs, or gitignore shim); rewriting from template.")
+            IO.write(nixFile, templatedNixContent)
           } else {
             log.info("[SBTIX_DEBUG genComposition] The generated file is clean (no IVY_LOCAL_BASE references)")
           }
@@ -475,7 +534,7 @@ object SbtixPlugin extends AutoPlugin {
             
             // Fall back to using our template
             log.info("[SBTIX_DEBUG genComposition] Falling back to using our template due to error")
-            IO.write(nixFile, rawNixContent)
+            IO.write(nixFile, templatedNixContent)
         }
       } else {
         // Try to check if there's a default.nix we should clean up
@@ -494,7 +553,7 @@ object SbtixPlugin extends AutoPlugin {
               val afterContent = IO.read(nixFile)
               if (afterContent.contains("IVY_LOCAL_BASE")) {
                 log.error("[SBTIX_DEBUG genComposition] Failed to fix IVY_LOCAL_BASE references, using our clean template")
-                IO.write(nixFile, rawNixContent)
+                IO.write(nixFile, templatedNixContent)
               }
             }
           } catch {
@@ -502,21 +561,30 @@ object SbtixPlugin extends AutoPlugin {
               log.error(s"[SBTIX_DEBUG genComposition] Error fixing existing default.nix: ${e.getMessage}")
               // Fall back to using our template
               log.info("[SBTIX_DEBUG genComposition] Falling back to using our template due to error")
-              IO.write(nixFile, rawNixContent)
+              IO.write(nixFile, templatedNixContent)
           }
         } else {
           // No existing file, generate one from our template
           log.info(s"[SBTIX_DEBUG genComposition] Generating default.nix from template")
-          IO.write(nixFile, rawNixContent)
+          IO.write(nixFile, templatedNixContent)
         }
         
         // Check for IVY_LOCAL_BASE in the file
         val writtenContent = IO.read(nixFile)
+        val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
+        val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
+        val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
+        val legacyGitignoreCall =
+          writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
+          writtenContent.contains("cleanSource (gitignore ./.);")
+
         if (writtenContent.contains("IVY_LOCAL_BASE")) {
           log.error("[SBTIX_DEBUG genComposition] ERROR: The generated file contains IVY_LOCAL_BASE references")
-          // Log the problematic part
           val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
           log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")
+        } else if (missingPluginRepo || legacyBuildInputs || legacyGitignoreParam || legacyGitignoreCall) {
+          log.warn("[SBTIX_DEBUG genComposition] Generated default.nix missing sbtix bootstrap wiring; regenerating from template.")
+          IO.write(nixFile, templatedNixContent)
         } else {
           log.info("[SBTIX_DEBUG genComposition] The generated file is clean (no IVY_LOCAL_BASE references)")
         }
@@ -570,13 +638,13 @@ object SbtixPlugin extends AutoPlugin {
           log.error(s"[SBTIX_DEBUG genComposition] Failed to copy sbtix.nix: ${e.getMessage}")
       }
 
-      // Patch plugin-version placeholder with the actual version to keep Coursier happy
+      // Render sbtix.nix template with runtime metadata (plugin version + bootstrap snippet)
       if (targetSbtixNix.exists()) {
         val raw = IO.read(targetSbtixNix)
-        val replaced = raw.replace("""${plugin-version}""", currentPluginVersion)
-        if (raw != replaced) {
-          log.info(s"[SBTIX_DEBUG genComposition] Injected plugin version $currentPluginVersion into ${targetSbtixNix.getAbsolutePath}")
-          IO.write(targetSbtixNix, replaced)
+        val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp)
+        if (raw != rendered) {
+          log.info(s"[SBTIX_DEBUG genComposition] Rendered sbtix.nix template for plugin version $currentPluginVersion")
+          IO.write(targetSbtixNix, rendered)
         }
 
         val refreshed = IO.read(targetSbtixNix)
@@ -587,7 +655,7 @@ object SbtixPlugin extends AutoPlugin {
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
               log.warn(s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name")
-              val updated = content.replace("""${plugin-version}""", currentPluginVersion)
+              val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp)
               IO.write(targetSbtixNix, updated)
             case None =>
               log.warn("[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file")
@@ -635,6 +703,32 @@ object SbtixPlugin extends AutoPlugin {
       } else if (!manualRepoTarget.exists()) {
         log.warn("[SBTIX_DEBUG genComposition] Falling back to empty manual-repo.nix")
         IO.write(manualRepoTarget, "[]")
+      }
+      
+      // Ensure sbtix-plugin-repo.nix (bootstrap artifacts for sbt itself) is present
+      val pluginRepoTarget = new File(currentProjectBaseDir, "sbtix-plugin-repo.nix")
+      val expectedPluginRepo = new File(expectedDir, "sbtix-plugin-repo.nix")
+      val packagedPluginRepo = Seq(
+        new File(buildRootDir, "nix-exprs/sbtix-plugin-repo.nix"),
+        new File(buildRootDir, "plugin/nix-exprs/sbtix-plugin-repo.nix")
+      ).find(_.exists())
+      if (expectedPluginRepo.exists()) {
+        log.info(s"[SBTIX_DEBUG genComposition] Copying expected sbtix-plugin-repo.nix from ${expectedPluginRepo.getAbsolutePath}")
+        IO.copyFile(expectedPluginRepo, pluginRepoTarget)
+      } else if (packagedPluginRepo.nonEmpty) {
+        val src = packagedPluginRepo.get
+        log.info(s"[SBTIX_DEBUG genComposition] Copying packaged sbtix-plugin-repo.nix from ${src.getAbsolutePath}")
+        IO.copyFile(src, pluginRepoTarget)
+      } else if (copyResource("sbtix-plugin-repo.nix", pluginRepoTarget)) {
+        log.info("[SBTIX_DEBUG genComposition] Extracted sbtix-plugin-repo.nix from plugin resources")
+      } else {
+        val repoFallback = new File(buildRootDir, "repo.nix")
+        if (repoFallback.exists()) {
+          log.warn(s"[SBTIX_DEBUG genComposition] Plugin template missing sbtix-plugin-repo.nix; copying fallback from ${repoFallback.getAbsolutePath}")
+          IO.copyFile(repoFallback, pluginRepoTarget)
+        } else if (!pluginRepoTarget.exists()) {
+          log.warn("[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access.")
+        }
       }
       
       // Automatically fix any IVY_LOCAL_BASE references in the generated file to use ivyDir

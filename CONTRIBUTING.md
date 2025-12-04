@@ -14,7 +14,7 @@ When you touch `plugin/src/main/resources/sbtix/default.nix.template`, regenerat
 
 and copying the resulting `default.nix` back into `expected/default.nix`. Repeat for any other scripted test that asserts on `default.nix` (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.
 
-### Updating the plugin's Nix lockfiles
+## Updating the plugin's Nix lockfiles
 
 Whenever you change the plugin's dependencies (Coursier bumps, new libraries, etc.), regenerate the Nix locks under `plugin/` so the sandboxed builds stay reproducible:
 
@@ -31,18 +31,17 @@ Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, and opti
 
 ### Integration
 
-The `tests` directory contains further integration tests. Move
-to the `tests` directory and run the appropriate `run.sh` from
-there.
+The `tests` directory contains the integration suites that validate multi-project builds and template generation. Run them from the repository root after entering the shared nix shell:
 
 ```console
-nix develop    # load the NIX_PATH and other dependencies
-# nix shell .    # build sbtix and add it to PATH
-nix build '.#sbtix'
+nix develop             # loads the sbt/shell tooling for all ziggo projects
+nix build '.#sbtix'     # produces ./result/bin/sbtix for the test scripts
 export PATH="$PWD/result/bin:$PATH"
 ./tests/multi-build/run.sh
 ./tests/template-generation/run.sh
 ```
+
+Whenever the template or bootstrap snippet changes, rerun the commands above and copy the regenerated `default.nix` (and related `.nix` snippets) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
 
 #### CI preview
 

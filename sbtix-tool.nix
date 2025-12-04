@@ -4,9 +4,13 @@ let
   versionSnapshotSuffix = "-SNAPSHOT";
   pluginVersion = "${version}${versionSnapshotSuffix}";
 
+  pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
+    version = pluginVersion;
+  };
+
   sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
-    [ "\${plugin-version}" ]
-    [ pluginVersion ]
+    [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
+    [ pluginVersion pluginBootstrapSnippet ]
     (builtins.readFile ./plugin/nix-exprs/sbtix.nix));
 
   sbtix = callPackage sbtixNix { inherit jdk jre sbt; };
