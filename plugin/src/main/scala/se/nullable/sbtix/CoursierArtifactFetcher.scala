@@ -135,10 +135,7 @@ class CoursierArtifactFetcher(
 
   private def toCoursierDependency(dep: SbtixDependency): CDependency = {
     val modId = dep.moduleId
-    val resolvedName =
-      CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
-        .map(applyFn => applyFn(modId.name))
-        .getOrElse(modId.name)
+    val resolvedName = resolveModuleName(modId)
 
     val module = CModule(
       organization = Organization(modId.organization),
@@ -170,6 +167,37 @@ class CoursierArtifactFetcher(
       optional = false,
       transitive = modId.isTransitive
     )
+  }
+
+  /** Most modules follow the standard Scala cross-versioning scheme, so we let
+    * sbt’s `CrossVersion` decorate the artifact name (foo_2.13 etc.). sbt
+    * plugins, however, encode both Scala and sbt binary versions in the name
+    * (foo_2.12_1.0). Those plugins advertise their target sbt/Scala versions via
+    * `e:sbtVersion` / `e:scalaVersion` extra attributes, so we look for those
+    * keys and synthesize the correct suffix ourselves. This fixes lookup URLs
+    * for artifacts like `com.github.sbt:sbt-native-packager`.
+    */
+  private def resolveModuleName(modId: ModuleID): String = {
+    val maybeSbtVersion = modId.extraAttributes.get("e:sbtVersion")
+    maybeSbtVersion match {
+      case Some(sbtVer) =>
+        val scalaSegment =
+          modId.extraAttributes
+            .get("e:scalaVersion")
+            .map(CrossVersion.binaryScalaVersion)
+            .getOrElse(scalaBinaryVersion)
+        val sbtSegment = binarySbtVersion(sbtVer)
+        s"${modId.name}_${scalaSegment}_${sbtSegment}"
+      case None =>
+        CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
+          .map(applyFn => applyFn(modId.name))
+          .getOrElse(modId.name)
+    }
+  }
+
+  private def binarySbtVersion(version: String): String = {
+    val parts = version.split("[\\.-]", 3)
+    if (parts.length >= 2) s"${parts(0)}.${parts(1)}" else version
   }
 
   private def downloadArtifact(artifact: CArtifact): Option[File] =
