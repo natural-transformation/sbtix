@@ -215,7 +215,7 @@ class CoursierArtifactFetcher(
         if (isIvyLocalRoot(normalizedRoot)) None
         else {
           val repoName = determineRepoName(resolver.name, normalizedRoot)
-          Some(RepoDescriptor(repoName, normalizedRoot, NixRepo(repoName, normalizedRoot)))
+          Some(RepoDescriptor(repoName, normalizedRoot, NixRepo(repoName)))
         }
       }
     }.toSeq
@@ -229,7 +229,7 @@ class CoursierArtifactFetcher(
     val deduped = deduplicateRepoNames(uniqueByRoot)
     val hasPublic = deduped.exists(_.normalizedRoot == DefaultPublicRoot)
     if (hasPublic) deduped
-    else deduped :+ RepoDescriptor("nix-public", DefaultPublicRoot, NixRepo("nix-public", DefaultPublicRoot))
+    else deduped :+ RepoDescriptor("nix-public", DefaultPublicRoot, NixRepo("nix-public"))
   }
 
   private def resolverToCoursierRepository(resolver: Resolver): Option[Repository] = {
