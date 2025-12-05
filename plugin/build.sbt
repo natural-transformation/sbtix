@@ -76,7 +76,7 @@ Compile / resourceGenerators += Def.task {
   val files = Seq(
     "sbtix.nix" -> (base / "nix-exprs" / "sbtix.nix"),
     "manual-repo.nix" -> (base / "nix-exprs" / "manual-repo.nix"),
-    "sbtix-plugin-repo.nix" -> (base / "repo.nix")
+    "sbtix-plugin-repo.nix" -> (base / "sbtix-plugin-repo.nix")
   )
   files.map { case (name, src) =>
     val dest = managed / name
