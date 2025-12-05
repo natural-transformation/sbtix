@@ -17,6 +17,9 @@ object Conversions {
    *   compilation
    */
   def convertRepository(repository: Any): coursier.core.Repository = {
+    /* sbt ships shaded coursier repositories; reflect over them and rebuild public instances
+     * so the 2.1.24 API surface can consume them.
+     */
     /**
      * Needs reflection because the sbt shading hides these classes from the
      * classpath:

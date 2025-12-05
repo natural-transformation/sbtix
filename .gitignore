@@ -11,5 +11,13 @@ tests/*/repo.nix
 .metals
 metals.sbt
 .vscode
+.DS_STORE
+
+.cache
+.sbt
+.sbt-boot
+.sbt-global
+.coursier-cache
+.ivy2-home
 
 tests/template-generation/default.nix

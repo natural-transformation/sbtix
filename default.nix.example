@@ -1,0 +1,38 @@
+{ pkgs ? import <nixpkgs> {} }:
+
+let
+  sbtixRepo = if builtins.pathExists ./repo.nix
+              then import ./repo.nix {
+                inherit (pkgs) fetchurl fetchgit fetchzip;
+              }
+              else { repos = []; };
+
+  sbtWithRepo = pkgs.sbt.override {
+    jre = pkgs.jdk11;
+  };
+
+in pkgs.stdenv.mkDerivation {
+  name = "sbtix-project";
+  src = ./.;
+
+  buildInputs = [ sbtWithRepo pkgs.jdk11 ];
+
+  shellHook = ''
+    export SBT_OPTS="${builtins.concatStringsSep " " (map (repoPath: "-Dsbt.repository.config=" + repoPath + "/repositories") sbtixRepo.repos)}"
+    if [ -n "$SBT_OPTS" ]; then
+      echo "SBT_OPTS set to: $SBT_OPTS"
+    else
+      echo "Warning: ./repo.nix not found or did not define any repos. SBT_OPTS is empty."
+    fi
+  '';
+
+  buildPhase = ''
+    sbt compile
+  '';
+
+  installPhase = ''
+    mkdir -p $out
+    cp -r target $out/
+  '';
+}
+

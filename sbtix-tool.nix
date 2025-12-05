@@ -2,8 +2,18 @@
 let
   version = "0.4";
   versionSnapshotSuffix = "-SNAPSHOT";
+  pluginVersion = "${version}${versionSnapshotSuffix}";
 
-  sbtix = callPackage ./plugin/nix-exprs/sbtix.nix { inherit jdk jre sbt; };
+  pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
+    version = pluginVersion;
+  };
+
+  sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
+    [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
+    [ pluginVersion pluginBootstrapSnippet ]
+    (builtins.readFile ./plugin/nix-exprs/sbtix.nix));
+
+  sbtix = callPackage sbtixNix { inherit jdk jre sbt; };
 
   sbtixPluginRepo = sbtix.buildSbtProject {
         name = "sbtix-plugin";
@@ -17,14 +27,14 @@ let
         installPhase =''
           sbt publishLocal
           mkdir -p $out/plugin-repo
-          cp ./.ivy2/local/* $out/plugin-repo -r
+          cp -r ./.ivy2-home/local/. $out/plugin-repo/
         '';
   };
 
   pluginsSbtix = writeText "plugins.sbt" ''
     resolvers += Resolver.file("Sbtix Plugin Repo", file("${sbtixPluginRepo}/plugin-repo"))(Resolver.ivyStylePatterns)
 
-    addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${version}${versionSnapshotSuffix}")
+    addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
   '';
 
   sbtixScript = runCommand "sbtix" {
@@ -33,7 +43,7 @@ let
     substitute ${./src/sbtix.sh} $out/bin/sbtix \
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
-      --replace @sbt@ ${sbt} \
+      --replace @sbt@ ${sbt}/bin/sbt \
       ;
     chmod a+x $out/bin/sbtix
   '';

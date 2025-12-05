@@ -3,147 +3,358 @@ package se.nullable.sbtix
 import scala.language.postfixOps
 import scala.language.implicitConversions
 
-import java.io.File
+import java.io.{File, FileOutputStream}
 import java.net.{URI, URL}
-import sbt.{uri, Credentials, Logger, ModuleID, PatternsBasedRepository, ProjectRef, Resolver}
-import coursier.*
-import lmcoursier.internal.shaded.coursier.core.Authentication
-import coursier.util.*
-import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
-import coursier.util.EitherT
-import lmcoursier.internal.Resolvers
-import lmcoursier.FromSbt
-
-import java.util.concurrent.ConcurrentSkipListSet
-import scala.collection.JavaConverters.*
-import java.util.concurrent.ExecutorService
+import java.util.Locale
+import java.nio.file.{Files => NioFiles}
+import java.util.concurrent.{ConcurrentSkipListSet, ExecutorService}
+import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
-import java.nio.file.{StandardCopyOption, Files => NioFiles}
+import scala.util.Try
+
+import sbt.{uri, Credentials, Logger, ModuleID, Resolver}
+import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, PatternsBasedRepository, URLRepository}
+
+import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
+import coursier.core.{Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
+import coursier.core.ResolutionProcess
+import coursier.util.{Artifact => CArtifact, EitherT, Task}
+
+import lmcoursier.internal.shaded.coursier.core.Authentication
+import lmcoursier.internal.Resolvers
+
 import se.nullable.sbtix.data.RoseTree
-import se.nullable.sbtix.utils.Conversions.*
-
-case class GenericModule(primaryArtifact: Artifact, dep: Dependency, localFile: File) {
-  private val isIvy = localFile.getParentFile.getName == "jars"
-
-  val url = URI.create(primaryArtifact.url).toURL()
-
-  private val authedUri = authed(url)
-
-  /** remote location of the module and all related artifacts */
-  private val calculatedParentURI =
-    if (isIvy)
-      parentURI(parentURI(authedUri))
-    else
-      parentURI(authedUri)
-
-  /** create the authenticated version of a given url */
-  def authed(url: URL): URI =
-    primaryArtifact.authentication match {
-      case Some(a) =>
-        a.passwordOpt match {
-          case Some(pwd) =>
-            new URI(
-              url.getProtocol,
-              s"${a.user}:${pwd}",
-              url.getHost,
-              url.getPort,
-              url.getPath,
-              url.getQuery,
-              url.getRef
-            )
-          case None => url.toURI
-        }
-      case None => url.toURI
-    }
-
-  /**
-   * resolve the URI of a sibling artifact, based on the primary artifact's
-   * parent URI
-   */
-  def calculateURI(f: File): URI =
-    if (isIvy)
-      calculatedParentURI.resolve(f.getParentFile.getName + "/" + f.getName)
-    else
-      calculatedParentURI.resolve(f.getName)
-
-  /** local location of the module and all related artifacts */
-  val localSearchLocation =
-    if (isIvy)
-      localFile.getParentFile.getParentFile
-    else
-      localFile.getParentFile
-}
+import se.nullable.sbtix.{Dependency => SbtixDependency}
+import se.nullable.sbtix.utils.Conversions.convertRepository
 
 case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparable[MetaArtifact] {
   override def compareTo(other: MetaArtifact): Int =
     artifactUrl.compareTo(other.artifactUrl)
+}
 
-  def matchesGenericModule(gm: GenericModule): Boolean = {
-    val organ   = gm.dep.module.organization
-    val name    = gm.dep.module.name
-    val version = gm.dep.version
+case class ProvidedArtifact(
+  organization: String,
+  name: String,
+  version: String,
+  localPath: String,
+  url: String
+) {
+  val coordinates: String = s"$organization:$name:$version"
+}
 
-    val slashOrgans = organ.copy(value = organ.value.replace(".", "/"))
-
-    val mvn = s"$slashOrgans/$name/$version"
-    val ivy = s"$organ/$name/$version"
-
-    artifactUrl.contains(mvn) || artifactUrl.contains(ivy)
+object ProvidedArtifact {
+  def from(dependency: CDependency, url: String): ProvidedArtifact = {
+    val file = new File(new URI(url))
+    ProvidedArtifact(
+      dependency.module.organization.value,
+      dependency.module.name.value,
+      dependency.version,
+      file.getCanonicalPath,
+      url
+    )
   }
 }
 
 class CoursierArtifactFetcher(
   logger: Logger,
   resolvers: Set[Resolver],
-  credentials: Set[Credentials]
+  credentials: Set[Credentials],
+  scalaVersion: String,
+  scalaBinaryVersion: String
 ) {
 
-  // Collects pom.xml and ivy.xml URLs from Coursier internals
-  val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
+  private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
+  private val ivyLocalResolver: Resolver =
+    Resolver.file(
+      "sbtix-ivy-local",
+      new File(new File(sys.props("user.home"), ".ivy2"), "local")
+    )(Resolver.ivyStylePatterns)
 
-  def apply(depends: Set[Dependency]): (Set[NixRepo], Set[NixArtifact], Set[ResolutionErrors]) = {
-    val (mods, errors) = buildNixProject(depends)
+  private val effectiveResolvers: Set[Resolver] =
+    if (resolvers.exists(_.name == ivyLocalResolver.name)) resolvers else resolvers + ivyLocalResolver
 
-    // Remove metaArtifacts that already have a module, to avoid double-processing
-    val metaArtifacts =
-      metaArtifactCollector.asScala.toSet.filterNot(meta => mods.exists(meta.matchesGenericModule))
+  def apply(depends: Set[SbtixDependency]): (Set[NixRepo], Set[NixArtifact], Set[ProvidedArtifact], Set[ResolutionErrors]) = {
+    logger.info(s"[SBTIX_DEBUG] Effective resolvers: ${effectiveResolvers.map(_.name).mkString(", ")}; ivyLocal=${ivyLocalCanonical.getPath}")
+    val coursierDeps = depends.map(toCoursierDependency)
+    val (resolvedArtifacts, errors) = getAllDependencies(coursierDeps)
+    logger.info(s"[SBTIX_DEBUG] Total resolved artifacts: ${resolvedArtifacts.size}")
+    resolvedArtifacts.foreach { case (_, artifact) =>
+      if (artifact.url.startsWith("file:")) {
+        logger.info(s"[SBTIX_DEBUG] Resolved local artifact ${artifact.url}")
+      } else {
+        logger.info(s"[SBTIX_DEBUG] Resolved artifact ${artifact.url}")
+      }
+    }
+    val cleanedErrors = filterLocalResolutionErrors(errors)
+    logger.info(s"[SBTIX_DEBUG] Resolution errors before filtering: ${errors.errors.size}, after: ${cleanedErrors.errors.size}")
 
-    // object to work with the rootUrl of Resolvers
-    val nixResolver = resolvers.map(NixResolver.resolve)
+    val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
+    val nixRepos = repoDescriptors.map(_.repo).toSet
 
-    // retrieve artifacts: poms/ivys/jars
-    val (repoSeq, artifactsSeqSeq) =
-      nixResolver.flatMap(_.filterArtifacts(logger, mods)).unzip
+    val (lockedArtifacts, providedArtifacts) =
+      resolvedArtifacts.foldLeft((Set.empty[NixArtifact], Set.empty[ProvidedArtifact])) {
+        case ((lockedAcc, providedAcc), (dependency, artifact)) =>
+          if (dependency.module.organization.value.contains("sbtix-test-multibuild")) {
+            logger.info(s"[SBTIX_DEBUG] Evaluating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} from ${artifact.url}")
+          }
+          if (artifact.url.startsWith("file:") && artifact.url.contains("sbtix-test-multibuild")) {
+            logger.info(s"[SBTIX_DEBUG] Local candidate ${artifact.url} -> ${isLocalIvyUrl(artifact.url)}")
+          }
+          if (isLocalIvyUrl(artifact.url)) {
+            logger.info(s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}")
+            (lockedAcc, providedAcc + ProvidedArtifact.from(dependency, artifact.url))
+          } else {
+            val maybeArtifact = downloadArtifact(artifact).map { file =>
+              val descriptor = descriptorForUrl(artifact.url, repoDescriptors)
+              val relative = computeRelativePath(artifact.url, descriptor)
+              val sha256 = computeSha256(file)
+              NixArtifact(descriptor.name, relative, artifact.url, sha256)
+            }
+            (maybeArtifact.map(lockedAcc + _).getOrElse(lockedAcc), providedAcc)
+          }
+      }
 
-    // retrieve metaArtifacts that were missed (e.g. parent POMs)
-    val (metaRepoSeq, metaArtifactsSeqSeq) =
-      nixResolver.flatMap(_.filterMetaArtifacts(logger, metaArtifacts)).unzip
+    val resolvedUrls = resolvedArtifacts.map { case (_, artifact) => artifact.url }.toSet
 
-    val nixArtifacts = artifactsSeqSeq.flatten ++ metaArtifactsSeqSeq.flatten
-    val nixRepos     = repoSeq ++ metaRepoSeq
+    val metaArtifacts = metaArtifactCollector.asScala.toSet
+      .filterNot(meta => resolvedUrls.contains(meta.artifactUrl))
+      .filterNot(meta => isLocalIvyUrl(meta.artifactUrl))
+      .map { meta =>
+        val descriptor = descriptorForUrl(meta.artifactUrl, repoDescriptors)
+        val relative = computeRelativePath(meta.artifactUrl, descriptor)
+        NixArtifact(descriptor.name, relative, meta.artifactUrl, meta.checkSum)
+      }
 
-    (nixRepos, nixArtifacts, Set(errors))
+    val sanitizedArtifacts = lockedArtifacts ++ metaArtifacts
+    logger.info(s"[SBTIX_DEBUG] Locked artifacts: ${lockedArtifacts.size}, meta: ${metaArtifacts.size}, provided: ${providedArtifacts.size}")
+
+    (nixRepos, sanitizedArtifacts, providedArtifacts, Set(cleanedErrors))
   }
 
-  /**
-   * Custom fetch to collect POM/ivy metadata for the metaArtifactCollector
-   */
-  def CacheFetch_WithCollector(
+  private def toCoursierDependency(dep: SbtixDependency): CDependency = {
+    val modId = dep.moduleId
+    val resolvedName = resolveModuleName(modId)
+
+    val module = CModule(
+      organization = Organization(modId.organization),
+      name = ModuleName(resolvedName),
+      attributes = modId.extraAttributes
+    )
+
+    val exclusions = modId.exclusions.map { rule =>
+      (Organization(rule.organization), ModuleName(rule.name))
+    }.toSet
+
+    val configuration = modId.configurations.map(Configuration(_)).getOrElse(Configuration.default)
+
+    val publication = modId.explicitArtifacts.headOption.map { art =>
+      Publication(
+        name = art.name,
+        `type` = Type(art.`type`),
+        ext = Extension(art.extension),
+        classifier = art.classifier.map(Classifier(_)).getOrElse(Classifier.empty)
+      )
+    }.getOrElse(Publication(modId.name, Type.jar, Extension.jar, Classifier.empty))
+
+    CDependency(
+      module = module,
+      version = modId.revision,
+      configuration = configuration,
+      exclusions = exclusions,
+      publication = publication,
+      optional = false,
+      transitive = modId.isTransitive
+    )
+  }
+
+  /** Most modules follow the standard Scala cross-versioning scheme, so we let
+    * sbt’s `CrossVersion` decorate the artifact name (foo_2.13 etc.). sbt
+    * plugins, however, encode both Scala and sbt binary versions in the name
+    * (foo_2.12_1.0). Those plugins advertise their target sbt/Scala versions via
+    * `e:sbtVersion` / `e:scalaVersion` extra attributes, so we look for those
+    * keys and synthesize the correct suffix ourselves. This fixes lookup URLs
+    * for artifacts like `com.github.sbt:sbt-native-packager`.
+    */
+  private def resolveModuleName(modId: ModuleID): String = {
+    val maybeSbtVersion = modId.extraAttributes.get("e:sbtVersion")
+    maybeSbtVersion match {
+      case Some(sbtVer) =>
+        val scalaSegment =
+          modId.extraAttributes
+            .get("e:scalaVersion")
+            .map(CrossVersion.binaryScalaVersion)
+            .getOrElse(scalaBinaryVersion)
+        val sbtSegment = binarySbtVersion(sbtVer)
+        s"${modId.name}_${scalaSegment}_${sbtSegment}"
+      case None =>
+        CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
+          .map(applyFn => applyFn(modId.name))
+          .getOrElse(modId.name)
+    }
+  }
+
+  private def binarySbtVersion(version: String): String = {
+    val parts = version.split("[\\.-]", 3)
+    if (parts.length >= 2) s"${parts(0)}.${parts(1)}" else version
+  }
+
+  private def downloadArtifact(artifact: CArtifact): Option[File] =
+    FileCache[Task](location = CacheDefaults.location)
+      .file(artifact)
+      .run
+      .unsafeRun()
+      .toOption
+
+  private def buildRepoDescriptors(sbtResolvers: Set[Resolver]): Seq[RepoDescriptor] = {
+    val baseDescriptors = sbtResolvers.flatMap { resolver =>
+      extractRoot(resolver).flatMap { root =>
+        val resolvedRoot = resolveIvyVariables(root)
+        val normalizedRoot = normalizeRoot(resolvedRoot)
+        if (isIvyLocalRoot(normalizedRoot)) None
+        else {
+          val repoName = determineRepoName(resolver.name, normalizedRoot)
+          Some(RepoDescriptor(repoName, normalizedRoot, NixRepo(repoName, normalizedRoot)))
+        }
+      }
+    }.toSeq
+
+    val uniqueByRoot = baseDescriptors
+      .groupBy(_.normalizedRoot)
+      .values
+      .map(_.head)
+      .toSeq
+
+    val deduped = deduplicateRepoNames(uniqueByRoot)
+    val hasPublic = deduped.exists(_.normalizedRoot == DefaultPublicRoot)
+    if (hasPublic) deduped
+    else deduped :+ RepoDescriptor("nix-public", DefaultPublicRoot, NixRepo("nix-public", DefaultPublicRoot))
+  }
+
+  private def resolverToCoursierRepository(resolver: Resolver): Option[Repository] = {
+    val repoOpt = Resolvers.repository(
+      resolver = resolver,
+      ivyProperties = ivyProps,
+      log = logger,
+      authentication = authenticationFor(resolver),
+      classLoaders = Seq()
+    )
+
+    /* lmcoursier 2.1.x now returns shaded repository implementations; bridge them back into
+     * public coursier.core.Repository so we can keep using the new API surface.
+     */
+    repoOpt.map {
+      case repo: Repository => repo
+      case other            => convertRepository(other)
+    }
+  }
+
+  private def buildFetcherRepositories(): Seq[Repository] =
+    effectiveResolvers.flatMap(resolverToCoursierRepository).toSeq
+
+  private def buildNixProject(modules: Set[CDependency]): (Set[(CDependency, CArtifact)], ResolutionErrors) =
+    getAllDependencies(modules)
+
+  private def getAllDependencies(modules: Set[CDependency]): (Set[(CDependency, CArtifact)], ResolutionErrors) = {
+    val repos = buildFetcherRepositories()
+    /* Coursier 2.1.24 switched to ResolutionProcess.fetch instead of the older Fetch.from API;
+     * using the new entry point keeps parity with upstream's parallel fetch/back-pressure improvements.
+     */
+    val fetch = ResolutionProcess.fetch(repos, CacheFetch_WithCollector())
+
+    def go(deps: Set[CDependency]): (Set[(CDependency, CArtifact)], ResolutionErrors) = {
+      val configured = Resolution()
+        .withRootDependencies(deps.toSeq)
+        .withDefaultConfiguration(Configuration.defaultCompile)
+        /* Keep dependency overrides disabled so the upgraded coursier behaves like the
+         * legacy master implementation.
+         */
+        .withEnableDependencyOverrides(false)
+
+      val resolution = configured.process.run(fetch, maxIterations = 100).unsafeRun()
+
+      val missingDependencies = findMissingDependencies(deps, resolution)
+      val resolvedMissingDependencies = missingDependencies.map(md => go(Set(md)))
+
+      val mainArtifacts = resolution.dependencyArtifacts().toSet
+      val classifierArtifacts =
+        resolution.dependencyArtifacts(classifiers = Some(Seq("tests", "sources", "javadoc").map(Classifier(_)))).toSet
+
+      val artifacts =
+        mainArtifacts
+          .union(classifierArtifacts)
+          .map { case (dependency, _, artifact) => (dependency, artifact) }
+          .union(resolvedMissingDependencies.flatMap(_._1))
+
+      val errors =
+        resolvedMissingDependencies.foldRight(
+          ResolutionErrors(resolution.errors)
+        )((resolved, acc) => acc + resolved._2)
+
+      (artifacts, errors)
+    }
+
+    go(modules)
+  }
+
+  private def findMissingDependencies(dependencies: Set[CDependency], resolution: Resolution): Set[CDependency] =
+    dependencies.flatMap { dep =>
+      if (resolution.dependencies.contains(dep))
+        findMissingDependencies(dep, resolution)
+      else
+        Set(dep)
+    }
+
+  private def findMissingDependencies(module: CDependency, resolution: Resolution): Set[CDependency] = {
+
+    def getDeps(dep: CDependency, withReconciledVersions: Boolean, maxDepth: Int): RoseTree[CDependency] =
+      if (maxDepth == 0)
+        RoseTree(dep, Nil)
+      else {
+        val children = resolution
+          .dependenciesOf(dep, withReconciledVersions)
+          .toList
+          .map(child => getDeps(child, withReconciledVersions, maxDepth - 1))
+        RoseTree(dep, children)
+      }
+
+    val reconciled = getDeps(module, withReconciledVersions = true, 100)
+    val raw = getDeps(module, withReconciledVersions = false, 100)
+
+    val possiblyMissing = diffDependencyTrees(raw, reconciled)
+    possiblyMissing.diff(resolution.dependencies)
+  }
+
+  private def diffDependencyTrees(raw: RoseTree[CDependency], reconciled: RoseTree[CDependency]): Set[CDependency] = {
+    val rawMap = raw.children.map(t => t.value -> t).toMap
+    val recMap = reconciled.children.map(t => t.value -> t).toMap
+
+    val diff = rawMap.keySet.diff(recMap.keySet)
+    val intersection = rawMap.keySet.intersect(recMap.keySet)
+
+    diff ++ intersection.flatMap { dep =>
+      diffDependencyTrees(rawMap(dep), recMap(dep))
+    }
+  }
+
+  private def CacheFetch_WithCollector(
     location: File = CacheDefaults.location,
     cachePolicies: Seq[CachePolicy] = Seq(CachePolicy.FetchMissing),
     checksums: Seq[Option[String]] = CacheDefaults.checksums,
-    logger: CacheLogger = CacheLogger.nop,
+    cacheLogger: CacheLogger = CacheLogger.nop,
     pool: ExecutorService = CacheDefaults.pool,
     ttl: Option[Duration] = CacheDefaults.ttl
   ): Cache.Fetch[Task] = { artifact =>
+    /* FileCache gained new defaults in 2.1.x; set the knobs explicitly so fetches stay
+     * deterministic across the upgraded API surface.
+     */
     val fileCache = FileCache[Task](
       location = location,
       cachePolicies = cachePolicies,
       checksums = checksums,
       credentials = CacheDefaults.credentials,
-      logger = logger,
+      logger = cacheLogger,
       pool = pool,
       ttl = ttl,
       localArtifactsShouldBeCached = false,
@@ -162,11 +373,11 @@ class CoursierArtifactFetcher(
       .file(artifact)
       .leftMap(_.describe)
       .flatMap { f =>
-        def notFound(f: File) = Left(s"${f.getCanonicalPath} not found")
+        def notFound(file: File) = Left(s"${file.getCanonicalPath} not found")
 
         def read(file: File) =
           try Right(
-            new String(NioFiles.readAllBytes(file.toPath), "UTF-8")
+            new String(java.nio.file.Files.readAllBytes(file.toPath), "UTF-8")
               .stripPrefix("\ufeff")
           )
           catch {
@@ -180,9 +391,7 @@ class CoursierArtifactFetcher(
               if (artifact.url.startsWith("file:")) {
                 val elements = f.listFiles.map { c =>
                   val name = c.getName
-                  val name0 =
-                    if (c.isDirectory) name + "/"
-                    else name
+                  val name0 = if (c.isDirectory) name + "/" else name
                   s"""<li><a href="$name0">$name0</a></li>"""
                 }.mkString
 
@@ -200,22 +409,20 @@ class CoursierArtifactFetcher(
 
                 Right(page)
               } else {
-                val f0 = new File(f, ".directory")
-                if (f0.exists()) {
-                  if (f0.isDirectory) Left(s"Woops: ${f.getCanonicalPath} is a directory")
-                  else read(f0)
-                } else notFound(f0)
+                val directoryFile = new File(f, ".directory")
+                if (directoryFile.exists()) {
+                  if (directoryFile.isDirectory) Left(s"Woops: ${f.getCanonicalPath} is a directory")
+                  else read(directoryFile)
+                } else notFound(directoryFile)
               }
             } else read(f)
           } else notFound(f)
 
-        // If res is Right, artifact was successfully downloaded
         if (res.isRight && artifact.url.startsWith("http")) {
-          // reduce the number of "failed" metaArtifacts by checking success
           val checkSum =
             FindArtifactsOfRepo
               .fetchChecksum(artifact.url, "-Meta- Artifact", f.toURI.toURL)
-              .get // caution: .get can throw if None
+              .get
 
           val authedUrl = artifact.authentication match {
             case Some(auth) if auth.passwordOpt.isDefined =>
@@ -231,176 +438,191 @@ class CoursierArtifactFetcher(
       }
   }
 
-  private def buildNixProject(modules: Set[Dependency]): (Set[GenericModule], ResolutionErrors) = {
-    val (dependenciesArtifacts, errors) = getAllDependencies(modules)
-    val genericModules = dependenciesArtifacts.flatMap { case (dependency, artifact) =>
-      val downloadedArtifact =
-        FileCache[Task](location = CacheDefaults.location).file(artifact)
+  private case class RepoDescriptor(name: String, normalizedRoot: String, repo: NixRepo)
 
-      downloadedArtifact.run.unsafeRun().toOption.map { localFile =>
-        GenericModule(artifact, dependency, localFile)
-      }
+  private val DefaultPublicRoot = normalizeRoot("https://repo1.maven.org/maven2/")
+
+  private def sanitizeRepoName(raw: String): String =
+    raw.trim.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]", "-")
+
+  private def stripTrailingSlash(value: String): String =
+    if (value.endsWith("/")) value.dropRight(1) else value
+
+  private def ensureTrailingSlash(url: String): String =
+    if (url.endsWith("/")) url else url + "/"
+
+  private def stripCredentials(url: String): String = {
+    val credentialPattern = "^(https?://)([^@/]+@)(.*)$".r
+    url match {
+      case credentialPattern(prefix, _, rest) => prefix + rest
+      case _ => url
     }
-    (genericModules, errors)
   }
 
-  private def getAllDependencies(modules: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
-    // Convert sbt Resolvers to coursier Repositories
-    val repos = resolvers.flatMap { resolver =>
-      val maybeAuth: Option[Authentication] = resolver match {
-        case mvn: sbt.MavenRepo =>
-          Credentials.forHost(credentials.toSeq, sbt.url(mvn.root).getHost).map { c =>
-            Authentication(
-              c.userName,
-              c.passwd,
-              optional = true,
-              Some(c.realm),
-              httpsOnly = false,
-              passOnRedirect = false
-            )
-          }
-        case ivy: PatternsBasedRepository =>
-          val pat      = ivy.patterns.artifactPatterns.head
-          val endIndex = pat.indexOf("[")
-          val root     = pat.substring(0, endIndex)
-          Credentials.forHost(credentials.toSeq, uri(root).getHost).map { c =>
-            Authentication(
-              c.userName,
-              c.passwd,
-              optional = true,
-              Some(c.realm),
-              httpsOnly = false,
-              passOnRedirect = false
-            )
-          }
-        case _: sbt.MavenCache =>
-          None // local maven cache typically doesn't need credentials
-        case other =>
-          throw new IllegalStateException(
-            s"Determining credentials for $other of type ${other.getClass} is not yet implemented"
-          )
-      }
-
-      val repo: Option[Any] = Resolvers.repository(
-        resolver = resolver,
-        ivyProperties = ivyProps,
-        log = logger,
-        authentication = maybeAuth,
-        classLoaders = Seq()
-      )
-      repo.map {
-        case coreRepo: Repository =>
-          coreRepo
-        case otherRepo =>
-          // From the signature on `Resolvers.repository` you would expect this to be dead code,
-          // but depending on the classpath `repository` may return a shaded Repository object
-          // that needs to be converted;
-          // since coursier 2.1.0-RC6, the newly added SbtMavenRepository is also converted here
-          convertRepository(otherRepo)
-      }
-    }
-
-    val fetch = ResolutionProcess.fetch(repos.toSeq, CacheFetch_WithCollector())
-
-    def go(deps: Set[Dependency]): (Set[(Dependency, Artifact)], ResolutionErrors) = {
-      val res        = Resolution(deps.toSeq)
-      val resolution = res.process.run(fetch, maxIterations = 100).unsafeRun()
-
-      val missingDependencies = findMissingDependencies(deps, resolution)
-      val resolvedMissingDependencies =
-        missingDependencies.map(md => go(Set(md)))
-
-      val mainArtifacts =
-        resolution
-          .dependencyArtifacts()
-          .toSet
-
-      // Still fetch extra classifiers, e.g. "tests", "sources", "javadoc"
-      val classifierArtifacts =
-        resolution
-          .dependencyArtifacts(classifiers = Some(Seq("tests", "sources", "javadoc").map(Classifier(_))))
-          .toSet
-
-      val artifacts =
-        mainArtifacts
-          .union(classifierArtifacts)
-          .map { case (dependency, publication, artifact) => (dependency, artifact) }
-          .union(resolvedMissingDependencies.flatMap(_._1))
-
-      val errors =
-        resolvedMissingDependencies.foldRight(
-          ResolutionErrors(resolution.errors)
-        )((resolved, acc) => acc + resolved._2)
-
-      (artifacts, errors)
-    }
-
-    go(modules)
-  }
-
-  /**
-   * If a given dependency wasn't in resolution.dependencies, try to see if
-   * there's a reconciled version or forced version we need to walk.
-   */
-  private def findMissingDependencies(dependencies: Set[Dependency], resolution: Resolution): Set[Dependency] =
-    dependencies.flatMap { dep =>
-      if (resolution.dependencies.contains(dep))
-        findMissingDependencies(dep, resolution)
+  private def normalizeRoot(url: String): String = {
+    val trimmed = stripCredentials(url.trim)
+    val withScheme =
+      if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("file:"))
+        trimmed
       else
-        Set(dep)
+        new File(trimmed).toURI.toString
+    ensureTrailingSlash(withScheme)
+  }
+
+  private def fallbackNameFromRoot(root: String): String = {
+    val withoutScheme = root.replaceFirst("https?://", "")
+    val cleaned = sanitizeRepoName(withoutScheme)
+    if (cleaned.nonEmpty) cleaned else "nix-public"
+  }
+
+  private def determineRepoName(raw: String, normalizedRoot: String): String = {
+    if (normalizedRoot == DefaultPublicRoot) {
+      "nix-public"
+    } else {
+      val cleaned = sanitizeRepoName(raw)
+      val base = if (cleaned.nonEmpty) cleaned else fallbackNameFromRoot(normalizedRoot)
+      if (base.startsWith("nix-")) base else s"nix-$base"
     }
+  }
 
-  private def findMissingDependencies(module: Dependency, resolution: Resolution): Set[Dependency] = {
-
-    def getDeps(dep: Dependency, withReconciledVersions: Boolean, maxDepth: Int): RoseTree[Dependency] =
-      if (maxDepth == 0)
-        RoseTree(dep, Nil)
-      else {
-        val children = resolution
-          .dependenciesOf(dep, withReconciledVersions)
-          .toList
-          .map(child => getDeps(child, withReconciledVersions, maxDepth - 1))
-        RoseTree(dep, children)
+  private def extractRoot(resolver: Resolver): Option[String] = resolver match {
+    case m: MavenRepository => Some(m.root)
+    case p: PatternsBasedRepository if p.patterns.artifactPatterns.nonEmpty =>
+      p.patterns.artifactPatterns.headOption.flatMap { pattern =>
+        val idx = pattern.indexOf('[')
+        val base = if (idx > 0) pattern.substring(0, idx) else pattern
+        Option(base).filter(_.nonEmpty)
       }
-
-    // Reconciled version tree
-    val reconciled = getDeps(module, withReconciledVersions = true, 100)
-    // Raw version tree
-    val raw = getDeps(module, withReconciledVersions = false, 100)
-
-    // Those in raw but not in reconciled might have been "dropped"
-    val possiblyMissing = diffDependencyTrees(raw, reconciled)
-    possiblyMissing.diff(resolution.dependencies)
+    case u: URLRepository if u.patterns.artifactPatterns.nonEmpty =>
+      u.patterns.artifactPatterns.headOption.flatMap { pattern =>
+        val idx = pattern.indexOf('[')
+        val base = if (idx > 0) pattern.substring(0, idx) else pattern
+        Option(base).filter(_.nonEmpty)
+      }
+    case _ => None
   }
 
-  private def diffDependencyTrees(raw: RoseTree[Dependency], reconciled: RoseTree[Dependency]): Set[Dependency] = {
-    val rawMap =
-      raw.children.map { t =>
-        t.value -> t
-      }.toMap
-    val recMap =
-      reconciled.children.map { t =>
-        t.value -> t
-      }.toMap
-
-    val diff =
-      rawMap.keySet
-        .diff(recMap.keySet)
-
-    val intersection =
-      rawMap.keySet
-        .intersect(recMap.keySet)
-
-    diff ++ intersection.flatMap { dep =>
-      diffDependencyTrees(rawMap(dep), recMap(dep))
+  private def deduplicateRepoNames(descriptors: Seq[RepoDescriptor]): Seq[RepoDescriptor] = {
+    val seen = scala.collection.mutable.Map.empty[String, Int]
+    descriptors.map { descriptor =>
+      val count = seen.getOrElse(descriptor.name, 0)
+      seen.update(descriptor.name, count + 1)
+      if (count == 0) descriptor
+      else {
+        val newName = s"${descriptor.name}-${count + 1}"
+        descriptor.copy(name = newName, repo = descriptor.repo.copy(name = newName))
+      }
     }
   }
+
+  private def descriptorForUrl(url: String, descriptors: Seq[RepoDescriptor]): RepoDescriptor = {
+    val normalizedUrl = stripCredentials(url)
+    descriptors.find(desc => normalizedUrl.startsWith(desc.normalizedRoot))
+      .orElse(descriptors.find(_.normalizedRoot == DefaultPublicRoot))
+      .getOrElse(descriptors.head)
+  }
+
+  private def computeRelativePath(url: String, descriptor: RepoDescriptor): String = {
+    val normalizedUrl = stripCredentials(url)
+    val prefix = descriptor.normalizedRoot
+    val rawRelative =
+      if (normalizedUrl.startsWith(prefix)) normalizedUrl.substring(prefix.length)
+      else normalizedUrl
+    rawRelative.stripPrefix("/")
+  }
+
+  private val ivyVariablePattern = "\\$\\{([^}]+)\\}".r
+
+  private def resolveIvyVariables(input: String): String =
+    ivyVariablePattern.replaceAllIn(input, m => ivyProps.getOrElse(m.group(1), m.matched))
+
+  private def computeSha256(file: File): String =
+    NixArtifact.checksum(file)
+
+  private def authenticationFor(resolver: Resolver): Option[Authentication] = resolver match {
+    case m: MavenRepository =>
+      hostFromUrl(m.root).flatMap(credentialsForHost)
+    case p: PatternsBasedRepository if p.patterns.artifactPatterns.nonEmpty =>
+      p.patterns.artifactPatterns.headOption
+        .flatMap(hostFromUrl)
+        .flatMap(credentialsForHost)
+    case _ => None
+  }
+
+  private def hostFromUrl(url: String): Option[String] =
+    Try(new URI(url)).toOption.flatMap(uri => Option(uri.getHost))
+
+  private def credentialsForHost(host: String): Option[Authentication] =
+    Credentials.forHost(credentials.toSeq, host).map { c =>
+      Authentication(
+        c.userName,
+        c.passwd,
+        optional = true,
+        realmOpt = Option(c.realm),
+        httpsOnly = false,
+        passOnRedirect = false
+      )
+    }
 
   private def ivyProps: Map[String, String] =
     Map("ivy.home" -> new File(sys.props("user.home"), ".ivy2").toString) ++ sys.props
+
+  private val ivyLocalDir = new File(new File(sys.props("user.home"), ".ivy2"), "local")
+  private val ivyLocalCanonical = ivyLocalDir.getCanonicalFile
+  private val ivyLocalUriPrefix = ivyLocalCanonical.toURI.toString.stripSuffix("/")
+
+  private def isLocalIvyUrl(url: String): Boolean =
+    if (!url.startsWith("file:")) false
+    else {
+      try {
+        val uri = new URI(url)
+        val canonical = new File(uri).getCanonicalFile
+        val basePath = ivyLocalCanonical.getPath
+        val canonicalPath = canonical.getPath
+        val result = canonicalPath.startsWith(basePath)
+        if (!result) {
+          logger.info(s"[SBTIX_DEBUG] Local Ivy check mismatch: candidate=$canonicalPath base=$basePath for url=$url")
+        } else {
+          logger.info(s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path $canonicalPath")
+        }
+        if (result) {
+          logger.info(s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path ${canonical.getPath}")
+        }
+        result
+      } catch {
+        case e: Exception =>
+          logger.warn(s"[SBTIX_DEBUG] Failed to inspect local Ivy URL $url: ${e.getMessage}")
+          false
+      }
+    }
+
+  private def isIvyLocalRoot(root: String): Boolean =
+    try {
+      val uri = new URI(root)
+      Option(uri.getScheme).exists(_.equalsIgnoreCase("file")) &&
+      new File(uri).getCanonicalPath.startsWith(ivyLocalCanonical.getPath)
+    } catch {
+      case _: Exception => false
+    }
+
+  private def filterLocalResolutionErrors(errors: ResolutionErrors): ResolutionErrors = {
+    val (skipped, kept) = errors.errors.partition { case ((module, version), _) =>
+      val moduleDir = new File(ivyLocalDir, s"${module.organization.value}/${module.name.value}/$version")
+      val exists = moduleDir.exists()
+      logger.info(s"[SBTIX_DEBUG] Checking Ivy local for ${module.organization.value}:${module.name.value}:$version at ${moduleDir.getAbsolutePath} -> ${if (exists) "found" else "missing"}")
+      exists
+    }
+
+    if (skipped.nonEmpty) {
+      val modules = skipped.map { case ((module, version), _) => s"${module.organization.value}:${module.name.value}:$version" }
+      logger.info(s"[SBTIX_DEBUG] Treating ${modules.mkString(", ")} as provided by sbtix-build-inputs (found in Ivy local).")
+    }
+
+    ResolutionErrors(kept)
+  }
 }
 
-case class ResolutionErrors(errors: Seq[(ModuleVersion, Seq[String])]) {
+case class ResolutionErrors(errors: Seq[(Resolution.ModuleVersion, Seq[String])]) {
   def +(other: ResolutionErrors): ResolutionErrors =
     ResolutionErrors(errors ++ other.errors)
 

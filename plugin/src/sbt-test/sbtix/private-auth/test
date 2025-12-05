@@ -5,6 +5,13 @@
 > genNix
 $ exists repo.nix
 $ exists project/repo.nix
+# Emit digests and human-friendly diffs to make failures actionable
+$ exec shasum repo.nix
+$ exec shasum expected/repo.nix
+$ exec shasum project/repo.nix
+$ exec shasum expected/project-repo.nix
+$ exec python3 expected/diff-debug.py repo.nix expected/repo.nix
+$ exec python3 expected/diff-debug.py project/repo.nix expected/project-repo.nix
 $ must-mirror repo.nix expected/repo.nix
 $ must-mirror project/repo.nix expected/project-repo.nix
 $ exec nix-build --show-trace -j32
