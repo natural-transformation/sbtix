@@ -10,11 +10,6 @@ import sbt.{Logger, ModuleID, Resolver}
 
 class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
 
-  "CoursierArtifactFetcher test" should "be skipped" in {
-    // Skip this test because we've rewritten the implementation
-    pending
-  }
-  
   "Utils.computeSha256" should "correctly calculate SHA-256 hash" in {
     // Create a temporary file with known content
     val tempFile = java.io.File.createTempFile("test", ".txt")
@@ -30,16 +25,6 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     // Test that we get a valid SHA-256 hash
     hash should have length 64
     hash should fullyMatch regex "[0-9a-f]{64}"
-  }
-  
-  "Extract host from URL" should "be skipped" in {
-    // Skip this test because we've rewritten the implementation
-    pending
-  }
-  
-  "Extract parent POMs" should "be skipped" in {
-    // Skip this test because we've rewritten the implementation
-    pending
   }
   
   val mockLogger = new Logger {
