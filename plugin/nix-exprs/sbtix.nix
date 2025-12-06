@@ -1,5 +1,7 @@
 # This file originates from SBTix
-{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk }:
+{ runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk
+, extraPluginRepos ? []
+}:
 let
     inherit (lib)
       catAttrs
@@ -178,12 +180,14 @@ in rec {
 
     buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? "", sbtOptions ? "", pluginBootstrap ? "", ...}:
       let
-          pluginRepoPath = ./sbtix-plugin-repo.nix;
+          pluginRepoCandidates = [
+            ./sbtix-plugin-repo.nix
+            ../sbtix-plugin-repo.nix
+          ];
           pluginRepos =
-            if builtins.pathExists pluginRepoPath then
-              [ (import pluginRepoPath) ]
-            else
-              [];
+            concatLists (map
+              (path: if builtins.pathExists path then [ (import path) ] else [])
+              pluginRepoCandidates) ++ extraPluginRepos;
           mergedRepo = repo ++ pluginRepos;
           localBuildsRepo =
             if builtins.typeOf sbtixBuildInputs == "list" then

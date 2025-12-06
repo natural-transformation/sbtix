@@ -691,7 +691,10 @@ fi"""
           case None => false
         }
       }
-      if (expectedManualRepo.exists()) {
+      log.info(s"[SBTIX_DEBUG genComposition] manual-repo target ${manualRepoTarget.getAbsolutePath} exists=${manualRepoTarget.exists()} isFile=${manualRepoTarget.isFile} canRead=${manualRepoTarget.canRead}")
+      if (manualRepoTarget.exists()) {
+        log.info(s"[SBTIX_DEBUG genComposition] manual-repo.nix already exists at ${manualRepoTarget.getAbsolutePath}, leaving it untouched")
+      } else if (expectedManualRepo.exists()) {
         log.info(s"[SBTIX_DEBUG genComposition] Copying expected manual-repo.nix from ${expectedManualRepo.getAbsolutePath}")
         IO.copyFile(expectedManualRepo, manualRepoTarget)
       } else if (packagedManualRepo.nonEmpty) {
@@ -700,7 +703,7 @@ fi"""
         IO.copyFile(src, manualRepoTarget)
       } else if (copyResource("manual-repo.nix", manualRepoTarget)) {
         log.info("[SBTIX_DEBUG genComposition] Extracted manual-repo.nix from plugin resources")
-      } else if (!manualRepoTarget.exists()) {
+      } else {
         log.warn("[SBTIX_DEBUG genComposition] Falling back to empty manual-repo.nix")
         IO.write(manualRepoTarget, "[]")
       }

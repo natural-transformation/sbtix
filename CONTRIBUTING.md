@@ -25,9 +25,10 @@ nix build '.#sbtix'
 cd plugin
 ../result/bin/sbtix genNix          # refreshes plugin/repo.nix and plugin/project/repo.nix
 ../result/bin/sbtix genComposition  # refreshes plugin/default.nix if needed
+../result/bin/sbtix-gen-all2        # produces project/project/repo.nix
 ```
 
-Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes.
+Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, `plugin/sbtix-plugin-repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes.
 
 ### Integration
 
