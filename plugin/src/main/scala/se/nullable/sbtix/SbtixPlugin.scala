@@ -7,7 +7,6 @@ import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
 import scala.sys.process._
-import java.util.Base64
 import scala.io.Source
 import sbt.io.syntax._
 import coursier.core.{Dependency => CoursierDependency, Module => CoursierCoreModule, ModuleName => CoursierModuleName, Organization => CoursierOrganization}
@@ -18,6 +17,7 @@ import sbt.IO.{copyFile, write}
  * The main plugin for Sbtix, which provides Nix integration for SBT.
  */
 object SbtixPlugin extends AutoPlugin {
+  import se.nullable.sbtix.SbtixHashes._
   private def findExpectedFile(baseDir: File, relativeNames: Seq[String]): Option[File] = {
     @annotation.tailrec
     def loop(dir: File): Option[File] = {
@@ -98,45 +98,6 @@ object SbtixPlugin extends AutoPlugin {
     * the plugin JAR from the files we already staged in the derivation.
     */
   private case class SourceBlock(block: String, pluginJarLine: String)
-
-  // `builtins.fetchTree` accepts SRI hashes (sha256-base64) while `fetchgit`
-  // expects the legacy nix-base32 representation. We keep the converter inline
-  // to avoid shelling out to `nix hash` (not available inside sbt).
-  private val NixBase32Alphabet = "0123456789abcdfghijklmnpqrsvwxyz"
-
-  private def sriToNixBase32(sri: String): Option[String] = {
-    val Prefix = "sha256-"
-    if (!sri.startsWith(Prefix)) None
-    else {
-      val base64Segment = sri.substring(Prefix.length)
-      val decodedBytes = try {
-        Base64.getDecoder.decode(base64Segment)
-      } catch {
-        case _: IllegalArgumentException => return None
-      }
-      Some(bytesToNixBase32(decodedBytes))
-    }
-  }
-
-  private def bytesToNixBase32(bytes: Array[Byte]): String = {
-    val sb = new StringBuilder
-    var buffer = 0
-    var bits = 0
-    bytes.foreach { b =>
-      buffer = (buffer << 8) | (b & 0xff)
-      bits += 8
-      while (bits >= 5) {
-        val idx = (buffer >> (bits - 5)) & 0x1f
-        bits -= 5
-        sb.append(NixBase32Alphabet.charAt(idx))
-      }
-    }
-    if (bits > 0) {
-      val idx = (buffer << (5 - bits)) & 0x1f
-      sb.append(NixBase32Alphabet.charAt(idx))
-    }
-    sb.toString
-  }
 
   private def resolveSbtixSourceBlock(pluginVersion: String): SourceBlock = {
     def fromEnvOrProp(envKey: String, propKey: String): Option[String] =
