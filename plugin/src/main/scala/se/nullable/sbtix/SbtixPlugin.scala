@@ -7,6 +7,7 @@ import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
 import scala.sys.process._
+import java.util.Base64
 import scala.io.Source
 import sbt.io.syntax._
 import coursier.core.{Dependency => CoursierDependency, Module => CoursierCoreModule, ModuleName => CoursierModuleName, Organization => CoursierOrganization}
@@ -37,7 +38,7 @@ object SbtixPlugin extends AutoPlugin {
 
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val DefaultNixTemplateResource = "/sbtix/default.nix.template"
-  private val StoreBootstrapMarker = "sbtixSource = builtins.fetchTree"
+  private val StoreBootstrapMarker = "sbtixSourceFetcher = {"
   
   private def indentMultiline(text: String, indent: String): String =
     text.linesIterator.map(line => indent + line).mkString("\n")
@@ -98,6 +99,50 @@ object SbtixPlugin extends AutoPlugin {
     */
   private case class SourceBlock(block: String, pluginJarLine: String)
 
+  // `builtins.fetchTree` accepts SRI hashes (e.g. "sha256-...") while the
+  // `pkgs.fetchgit` fallback needs legacy nix-base32 strings. Keeping this tiny
+  // converter here avoids shelling out to `nix hash` (which would not be
+  // available inside the sbt process) and keeps the fallback deterministic.
+  private val NixBase32Alphabet = "0123456789abcdfghijklmnpqrsvwxyz"
+
+  /** Converts an SRI string (sha256-base64) into the nix-base32 variant used by
+    * `fetchgit`. This keeps the fallback path self-contained (no external hash
+    * tooling, no Nix dependency inside sbt).
+    */
+  private def sriToNixBase32(sri: String): Option[String] = {
+    val Prefix = "sha256-"
+    if (!sri.startsWith(Prefix)) None
+    else {
+      val base64Segment = sri.substring(Prefix.length)
+      val decodedBytes = try {
+        Base64.getDecoder.decode(base64Segment)
+      } catch {
+        case _: IllegalArgumentException => return None
+      }
+      Some(bytesToNixBase32(decodedBytes))
+    }
+  }
+
+  private def bytesToNixBase32(bytes: Array[Byte]): String = {
+    val sb = new StringBuilder
+    var buffer = 0
+    var bits = 0
+    bytes.foreach { b =>
+      buffer = (buffer << 8) | (b & 0xff)
+      bits += 8
+      while (bits >= 5) {
+        val idx = (buffer >> (bits - 5)) & 0x1f
+        bits -= 5
+        sb.append(NixBase32Alphabet.charAt(idx))
+      }
+    }
+    if (bits > 0) {
+      val idx = (buffer << (5 - bits)) & 0x1f
+      sb.append(NixBase32Alphabet.charAt(idx))
+    }
+    sb.toString
+  }
+
   private def resolveSbtixSourceBlock(pluginVersion: String): SourceBlock = {
     def fromEnvOrProp(envKey: String, propKey: String): Option[String] =
       sys.props.get(propKey).filter(_.nonEmpty).orElse(sys.env.get(envKey))
@@ -108,12 +153,25 @@ object SbtixPlugin extends AutoPlugin {
       .getOrElse("https://github.com/natural-transformation/sbtix")
     (maybeRev, maybeNarHash) match {
       case (Some(rev), Some(narHash)) =>
+        val sha256 = sriToNixBase32(narHash).getOrElse {
+          throw new IllegalArgumentException(
+            s"Unable to convert narHash '$narHash' into a Nix base32 sha256 hash."
+          )
+        }
         val block =
-          s"""  sbtixSource = builtins.fetchTree {
+          s"""  sbtixSourceFetcher = { url, rev, narHash, sha256, ... }@args:
+             |    if builtins ? fetchTree
+             |    then builtins.fetchTree (builtins.removeAttrs args [ "sha256" ])
+             |    else pkgs.fetchgit {
+             |      inherit url rev sha256;
+             |    };
+             |
+             |  sbtixSource = sbtixSourceFetcher {
              |    type = "git";
              |    url = "$sourceUrl";
              |    rev = "$rev";
              |    narHash = "$narHash";
+             |    sha256 = "$sha256";
              |  };
              |
              |  sbtixPluginRepos = [
