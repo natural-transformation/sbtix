@@ -99,16 +99,11 @@ object SbtixPlugin extends AutoPlugin {
     */
   private case class SourceBlock(block: String, pluginJarLine: String)
 
-  // `builtins.fetchTree` accepts SRI hashes (e.g. "sha256-...") while the
-  // `pkgs.fetchgit` fallback needs legacy nix-base32 strings. Keeping this tiny
-  // converter here avoids shelling out to `nix hash` (which would not be
-  // available inside the sbt process) and keeps the fallback deterministic.
+  // `builtins.fetchTree` accepts SRI hashes (sha256-base64) while `fetchgit`
+  // expects the legacy nix-base32 representation. We keep the converter inline
+  // to avoid shelling out to `nix hash` (not available inside sbt).
   private val NixBase32Alphabet = "0123456789abcdfghijklmnpqrsvwxyz"
 
-  /** Converts an SRI string (sha256-base64) into the nix-base32 variant used by
-    * `fetchgit`. This keeps the fallback path self-contained (no external hash
-    * tooling, no Nix dependency inside sbt).
-    */
   private def sriToNixBase32(sri: String): Option[String] = {
     val Prefix = "sha256-"
     if (!sri.startsWith(Prefix)) None
