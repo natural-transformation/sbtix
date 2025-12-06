@@ -13,7 +13,12 @@ let
     [ pluginVersion pluginBootstrapSnippet ]
     (builtins.readFile ./plugin/nix-exprs/sbtix.nix));
 
-  sbtix = callPackage sbtixNix { inherit jdk jre sbt; };
+  sbtix = callPackage sbtixNix {
+    inherit jdk jre sbt;
+    extraPluginRepos = [
+      (import ./plugin/sbtix-plugin-repo.nix)
+    ];
+  };
 
   sbtixPluginRepo = sbtix.buildSbtProject {
         name = "sbtix-plugin";
