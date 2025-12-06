@@ -14,6 +14,8 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
+{{SBTIX_SOURCE_BLOCK}}
+
   manualRepo = import ./manual-repo.nix;
   repoLock = import ./repo.nix;
   projectRepo = import ./project/repo.nix;
@@ -41,6 +43,7 @@ in
     sbtOptions = "-Dplugin.version={{PLUGIN_VERSION}}";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
+{{PLUGIN_JAR_LINE}}
 {{PLUGIN_BOOTSTRAP_SNIPPET}}
     '';
   }

@@ -15,7 +15,10 @@
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       perSystem = { pkgs, ... }:
         let
-          sbtixPackage = pkgs.callPackage ./sbtix-tool.nix { };
+          selfSourceInfo = inputs.self.sourceInfo or {};
+          sbtixPackage = pkgs.callPackage ./sbtix-tool.nix {
+            inherit selfSourceInfo;
+          };
         in {
           packages = {
             sbtix = sbtixPackage;

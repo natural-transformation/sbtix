@@ -37,6 +37,7 @@ object SbtixPlugin extends AutoPlugin {
 
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val DefaultNixTemplateResource = "/sbtix/default.nix.template"
+  private val StoreBootstrapMarker = "sbtixSource = builtins.fetchTree"
   
   private def indentMultiline(text: String, indent: String): String =
     text.linesIterator.map(line => indent + line).mkString("\n")
@@ -95,21 +96,66 @@ object SbtixPlugin extends AutoPlugin {
     * minimal Ivy repository entry under `.ivy2-home` so that Coursier can resolve
     * the plugin JAR from the files we already staged in the derivation.
     */
+  private case class SourceBlock(block: String, pluginJarLine: String)
+
+  private def resolveSbtixSourceBlock(pluginVersion: String): SourceBlock = {
+    def fromEnvOrProp(envKey: String, propKey: String): Option[String] =
+      sys.props.get(propKey).filter(_.nonEmpty).orElse(sys.env.get(envKey))
+
+    val maybeRev = fromEnvOrProp("SBTIX_SOURCE_REV", "sbtix.sourceRev")
+    val maybeNarHash = fromEnvOrProp("SBTIX_SOURCE_NAR_HASH", "sbtix.sourceNarHash")
+    val sourceUrl = fromEnvOrProp("SBTIX_SOURCE_URL", "sbtix.sourceUrl")
+      .getOrElse("https://github.com/natural-transformation/sbtix")
+    (maybeRev, maybeNarHash) match {
+      case (Some(rev), Some(narHash)) =>
+        val block =
+          s"""  sbtixSource = builtins.fetchTree {
+             |    type = "git";
+             |    url = "$sourceUrl";
+             |    rev = "$rev";
+             |    narHash = "$narHash";
+             |  };
+             |
+             |  sbtixPluginRepos = [
+             |    (import (sbtixSource + "/plugin/repo.nix"))
+             |    (import (sbtixSource + "/plugin/project/repo.nix"))
+             |    (import (sbtixSource + "/plugin/nix-exprs/manual-repo.nix"))
+             |  ];
+             |
+             |  sbtixPluginIvy = sbtix.buildSbtLibrary {
+             |    name = "sbtix-plugin";
+             |    src = cleanSource (sbtixSource + "/plugin");
+             |    repo = sbtixPluginRepos;
+             |  };
+             |
+             |  sbtixPluginJarPath = "$${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/$pluginVersion/jars/sbtix.jar";
+             |""".stripMargin
+        SourceBlock(block, "      pluginJar=\"${sbtixPluginJarPath}\"\n")
+      case _ =>
+        SourceBlock("", "")
+    }
+  }
+
   private def pluginBootstrapBody(version: String, timestamp: String): String = {
     val pom = indentMultiline(pluginPomXml(version), "    ")
     val ivy = indentMultiline(pluginIvyXml(version, timestamp), "    ")
     s"""ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/$version"
 mkdir -p "$$ivyDir/jars" "$$ivyDir/ivys" "$$ivyDir/poms"
-if [ -f ./sbtix-plugin-under-test.jar ]; then
+if [ -n "$${pluginJar:-}" ] && [ -f "$$pluginJar" ]; then
+  cp "$$pluginJar" $$ivyDir/jars/sbtix.jar
+elif [ -f ./sbtix-plugin-under-test.jar ]; then
   cp ./sbtix-plugin-under-test.jar $$ivyDir/jars/sbtix.jar
-  cat <<POM_EOF > $$ivyDir/poms/sbtix-$version.pom
+else
+  echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
+  exit 1
+fi
+cat <<POM_EOF > $$ivyDir/poms/sbtix-$version.pom
 $pom
 POM_EOF
-  cat <<IVY_EOF > $$ivyDir/ivys/ivy.xml
+cat <<IVY_EOF > $$ivyDir/ivys/ivy.xml
 $ivy
 IVY_EOF
-  ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml
-fi"""
+ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   }
 
   /** Indents the bootstrap script so it drops cleanly into the templated heredoc
@@ -120,8 +166,11 @@ fi"""
 
   private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String): String = {
     val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ")
+    val sourceBlock = resolveSbtixSourceBlock(pluginVersion)
     raw
       .replace("{{PLUGIN_BOOTSTRAP_SNIPPET}}", snippet)
+      .replace("{{SBTIX_SOURCE_BLOCK}}", sourceBlock.block)
+      .replace("{{PLUGIN_JAR_LINE}}", sourceBlock.pluginJarLine)
       .replace("""${plugin-version}""", pluginVersion)
   }
   
@@ -215,15 +264,12 @@ fi"""
     */
   private def defaultNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String): String = {
     val timestamp = System.currentTimeMillis().toString
-    val replacements = Map(
-      "{{SBT_BUILD_VERSION}}" -> sbtBuildVersion,
-      "{{PLUGIN_VERSION}}" -> currentPluginVersion,
-      "{{PLUGIN_BOOTSTRAP_SNIPPET}}" -> pluginBootstrapSnippet(currentPluginVersion, timestamp, "      ")
-    )
+    val templated =
+      renderSbtixTemplate(loadDefaultNixTemplate(), currentPluginVersion, timestamp)
+        .replace("{{PLUGIN_VERSION}}", currentPluginVersion)
+        .replace("{{SBT_BUILD_VERSION}}", sbtBuildVersion)
 
-    replacements.foldLeft(loadDefaultNixTemplate()) { case (acc, (token, value)) =>
-      acc.replace(token, value)
-    }
+    templated
   }
   
   override lazy val projectSettings = Seq(
@@ -379,6 +425,19 @@ fi"""
         log.info(s"[SBTIX_DEBUG genComposition] Files in ${currentProjectBaseDir.getAbsolutePath}: [${filesInCurrentDir}]")
       } catch { case e: Exception => log.warn(s"[SBTIX_DEBUG genComposition] Error listing files: ${e.getMessage}") }
 
+      val currentPluginVersion = sys.props.getOrElse("plugin.version", version.value)
+      val bootstrapTimestamp = System.currentTimeMillis().toString
+      log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
+
+      val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
+      val usesStoreBootstrap = rawNixContent.contains(StoreBootstrapMarker)
+      val templatedNixContent =
+        rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
+      if (usesStoreBootstrap)
+        log.info("[SBTIX_DEBUG genComposition] Store-backed plugin bootstrap detected; no workspace jar required.")
+      else
+        log.info("[SBTIX_DEBUG genComposition] Falling back to workspace sbtix-plugin-under-test.jar bootstrap.")
+
       // Find the sbtix-plugin-under-test.jar file - check multiple locations
       val scriptedBaseDirSysProp = "sbt.scripted.basedir"
       val sourceJarInScriptedRoot = sys.props.get(scriptedBaseDirSysProp) match {
@@ -453,24 +512,29 @@ fi"""
       val targetJarInNixSrc = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
       log.info(s"[SBTIX_DEBUG genComposition] Target JAR (for Nix 'src'): ${targetJarInNixSrc.getAbsolutePath}")
 
-      // Copy the JAR if needed
-      if (sourceJar.getCanonicalPath != targetJarInNixSrc.getCanonicalPath) {
-        log.info(s"[SBTIX_DEBUG genComposition] Copying JAR from ${sourceJar.getAbsolutePath} to ${targetJarInNixSrc.getAbsolutePath}")
-        try {
-          copyFile(sourceJar, targetJarInNixSrc)
-          log.info(s"[SBTIX_DEBUG genComposition] JAR copy successful.")
-        } catch {
-          case e: Exception => 
-            log.error(s"[SBTIX_DEBUG genComposition] FAILED to copy JAR: ${e.getMessage}")
-            // Continue anyway to generate the composition file
+      if (usesStoreBootstrap) {
+        if (targetJarInNixSrc.exists()) {
+          log.info("[SBTIX_DEBUG genComposition] Store-backed bootstrap active; removing legacy sbtix-plugin-under-test.jar")
+          IO.delete(targetJarInNixSrc)
+        } else {
+          log.info("[SBTIX_DEBUG genComposition] Store-backed bootstrap active; no workspace JAR needed")
         }
       } else {
-        log.info(s"[SBTIX_DEBUG genComposition] Source JAR is already in the target location")
+        // Copy the JAR if needed
+        if (sourceJar.getCanonicalPath != targetJarInNixSrc.getCanonicalPath) {
+          log.info(s"[SBTIX_DEBUG genComposition] Copying JAR from ${sourceJar.getAbsolutePath} to ${targetJarInNixSrc.getAbsolutePath}")
+          try {
+            copyFile(sourceJar, targetJarInNixSrc)
+            log.info(s"[SBTIX_DEBUG genComposition] JAR copy successful.")
+          } catch {
+            case e: Exception => 
+              log.error(s"[SBTIX_DEBUG genComposition] FAILED to copy JAR: ${e.getMessage}")
+              // Continue anyway to generate the composition file
+          }
+        } else {
+          log.info(s"[SBTIX_DEBUG genComposition] Source JAR is already in the target location")
+        }
       }
-
-      val currentPluginVersion = sys.props.getOrElse("plugin.version", version.value)
-      val bootstrapTimestamp = System.currentTimeMillis().toString
-      log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
       
       // Check if there's an expected default.nix file we should use
       val expectedDir = new File(currentProjectBaseDir, "expected")
@@ -480,10 +544,7 @@ fi"""
       log.info(s"[SBTIX_DEBUG genComposition] Expected dir exists: ${expectedDir.exists()}, expected default.nix exists: ${expectedDefaultNix.exists()}")
       
       // Use the template to generate the nixContent regardless of whether we'll use it or not
-      val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
-      val templatedNixContent =
-        rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
-      
+     
       if (expectedDefaultNix.exists()) {
         // Use the expected default.nix for testing
         log.info(s"[SBTIX_DEBUG genComposition] Using expected default.nix from ${expectedDefaultNix.getAbsolutePath}")
@@ -508,6 +569,8 @@ fi"""
           log.info(s"[SBTIX_DEBUG genComposition] Written content has ${writtenContent.length} characters")
           
           // Check for IVY_LOCAL_BASE in the file
+          val missingStoreBootstrap = usesStoreBootstrap && !writtenContent.contains(StoreBootstrapMarker)
+          val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
           val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
           val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
           val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
@@ -515,7 +578,10 @@ fi"""
             writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
             writtenContent.contains("cleanSource (gitignore ./.);")
 
-          if (writtenContent.contains("IVY_LOCAL_BASE")) {
+          if (missingStoreBootstrap || legacyPluginJarLine) {
+            log.warn("[SBTIX_DEBUG genComposition] default.nix missing store-backed sbtix bootstrap; rewriting from template.")
+            IO.write(nixFile, templatedNixContent)
+          } else if (writtenContent.contains("IVY_LOCAL_BASE")) {
             log.error("[SBTIX_DEBUG genComposition] ERROR: The copied file still contains IVY_LOCAL_BASE references")
             val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
             log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")
@@ -571,6 +637,8 @@ fi"""
         
         // Check for IVY_LOCAL_BASE in the file
         val writtenContent = IO.read(nixFile)
+        val missingStoreBootstrap = usesStoreBootstrap && !writtenContent.contains(StoreBootstrapMarker)
+        val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
         val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
         val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
         val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
@@ -578,7 +646,10 @@ fi"""
           writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
           writtenContent.contains("cleanSource (gitignore ./.);")
 
-        if (writtenContent.contains("IVY_LOCAL_BASE")) {
+        if (missingStoreBootstrap || legacyPluginJarLine) {
+          log.warn("[SBTIX_DEBUG genComposition] default.nix missing store-backed sbtix bootstrap; regenerating from template.")
+          IO.write(nixFile, templatedNixContent)
+        } else if (writtenContent.contains("IVY_LOCAL_BASE")) {
           log.error("[SBTIX_DEBUG genComposition] ERROR: The generated file contains IVY_LOCAL_BASE references")
           val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
           log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")

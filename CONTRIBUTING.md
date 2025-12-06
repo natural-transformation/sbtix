@@ -12,7 +12,8 @@ When you touch `plugin/src/main/resources/sbtix/default.nix.template`, regenerat
 (cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=0.4-SNAPSHOT "clean" "genNix" "genComposition")
 ```
 
-and copying the resulting `default.nix` back into `expected/default.nix`. Repeat for any other scripted test that asserts on `default.nix` (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.
+and copying the resulting `default.nix` back into `expected/default.nix`. Repeat for any other scripted test that asserts on `default.nix` (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.  
+If you are running from a dirty sbtix checkout, remember to set the variables described in “Local sbtix checkouts” first.
 
 ## Updating the plugin's Nix lockfiles
 
@@ -28,7 +29,7 @@ cd plugin
 ../result/bin/sbtix-gen-all2        # produces project/project/repo.nix
 ```
 
-Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, `plugin/sbtix-plugin-repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes.
+Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, `plugin/sbtix-plugin-repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes. Use the environment exports only when testing local sbtix changes.
 
 ### Integration
 
@@ -54,3 +55,16 @@ hci effect run --no-token --as-branch master default.effects.tests.multi-build
 ```
 
 You can find the tests through tab completion.
+
+### Local sbtix checkouts (optional)
+
+Normal development uses the released sbtix build (`nix shell github:natural-transformation/sbtix` or `nix build '.#sbtix'`), so no extra environment is required.  
+If you need to exercise unmerged changes directly from your working tree, export the following once per shell so generated `default.nix` files can fetch the exact same revision:
+
+```bash
+export SBTIX_SOURCE_URL="https://github.com/natural-transformation/sbtix"
+export SBTIX_SOURCE_REV="$(git rev-parse HEAD)"
+export SBTIX_SOURCE_NAR_HASH="$(nix hash path .)"
+```
+
+Skip this section entirely when using published sbtix binaries. The Scripted, lockfile, and integration instructions above only require these exports when you explicitly test local sbtix changes.

@@ -20,7 +20,7 @@ Additionally, this means that Nix can do a better job of enforcing purity where 
 When you run `sbtix genNix` / `genComposition`, the plugin orchestrates three steps:
 
 1. **Collect dependencies:** Sbtix walks your sbt build, resolves everything with Coursier (using your resolvers + credentials), and emits a locked `repo.nix`. Private repositories keep their own namespace (e.g. `nix-private-demo`) so you can see where each artifact originates.
-2. **Generate the composition:** The plugin renders `default.nix` from a shared template. That template sets up sandbox-safe caches, writes the sbtix plugin into a local Ivy repo so sbt can run offline, invokes `sbt compile`/`stage`, and copies every `*/target/universal/stage` tree into `$out`. If no staged binaries exist the build fails loudly, which means `nix-build` produces the same runnable outputs that `sbt stage` would.
+2. **Generate the composition:** The plugin renders `default.nix` from a shared template. That template sets up sandbox-safe caches, writes the sbtix plugin into a local Ivy repo by copying it from the Nix store so sbt can run offline, invokes `sbt compile`/`stage`, and copies every `*/target/universal/stage` tree into `$out`. If no staged binaries exist the build fails loudly, which means `nix-build` produces the same runnable outputs that `sbt stage` would.
 3. **Consume from Nix:** The generated `default.nix` can be used as-is, or you can call the helpers in `plugin/nix-exprs/sbtix.nix` (`buildSbtProgram`, `buildSbtLibrary`, etc.) if you need a different layout. Either way, the derivation reads the locked `repo.nix` files and the staged application copied in step 2, so builds are reproducible and network-free.
 
 This pipeline keeps your sbt workflow fast (dependency metadata is cached) while ensuring the Nix derivation is always in sync with what the sbt plugin produces.
@@ -54,6 +54,12 @@ sbtix provides a number of scripts to generate and update Nix expressions to fet
  * `sbtix-gen-all` - gen build and plugin dependencies, produces `repo.nix` and `project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix`
  * `sbtix-gen-all2` - gen build, plugin and pluginplugin dependencies, produces `repo.nix`, `project/repo.nix`, and `project/project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix "reload plugins" genNix`
 
+#### Typical regeneration flow
+
+1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`). Check these files into VCS so CI and teammates get the same locks.
+2. `sbtix genComposition` – renders `default.nix` using the shared template. The generated file now embeds a `builtins.fetchTree` block that points back to the sbtix revision you used for generation, so the Nix build fetches (and copies) the plugin directly from the store instead of relying on a `sbtix-plugin-under-test.jar` in your working tree.
+3. Commit the refreshed `repo.nix` files (and `default.nix` if you keep the generated template) before running `nix build`.
+
 ### Creating a build
 
  * run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `default.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is unless you need custom behaviour.
@@ -82,8 +88,8 @@ in
     }
 ```
 
- * generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
- * (optional) rerun `sbtix genComposition` after changing dependencies to regenerate `default.nix` so it stays in sync with the template.
+* generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
+* rerun `sbtix genComposition` after changing dependencies to regenerate `default.nix` so it stays in sync with both the template and the sbtix revision you are using.
  * check the generated nix files into your source control.
  * finally, run `nix-build` to build!
  * any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.

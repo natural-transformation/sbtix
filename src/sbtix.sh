@@ -26,5 +26,16 @@ export SBT_OPTS="-Dsbt.global.base=${GLOBAL_DIR}${SBT_OPTS:+ ${SBT_OPTS}}"
 echo "Updating ${PLUGIN_DIR}/sbtix_plugin.sbt symlink"
 ln -sf "@plugin@" "${PLUGIN_DIR}/sbtix_plugin.sbt"
 
+if [ -n "@sourceRev@" ] && [ -n "@sourceNarHash@" ]; then
+  export SBTIX_SOURCE_URL="@sourceUrl@"
+  export SBTIX_SOURCE_REV="@sourceRev@"
+  export SBTIX_SOURCE_NAR_HASH="@sourceNarHash@"
+fi
+
+if [ -n "${SBTIX_SOURCE_REV:-}" ] && [ -n "${SBTIX_SOURCE_NAR_HASH:-}" ]; then
+  sourceUrl="${SBTIX_SOURCE_URL:-https://github.com/natural-transformation/sbtix}"
+  export SBT_OPTS="$SBT_OPTS -Dsbtix.sourceUrl=$sourceUrl -Dsbtix.sourceRev=$SBTIX_SOURCE_REV -Dsbtix.sourceNarHash=$SBTIX_SOURCE_NAR_HASH"
+fi
+
 exec @sbt@ "$@"
 

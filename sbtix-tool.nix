@@ -1,4 +1,6 @@
-{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, jre, sbt }:
+{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand
+, jdk, jre, sbt, selfSourceInfo ? {}
+}:
 let
   version = "0.4";
   versionSnapshotSuffix = "-SNAPSHOT";
@@ -19,6 +21,10 @@ let
       (import ./plugin/sbtix-plugin-repo.nix)
     ];
   };
+
+  sourceUrl = "https://github.com/natural-transformation/sbtix";
+  sourceRev = selfSourceInfo.rev or "";
+  sourceNarHash = selfSourceInfo.narHash or "";
 
   sbtixPluginRepo = sbtix.buildSbtProject {
         name = "sbtix-plugin";
@@ -49,6 +55,9 @@ let
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
       --replace @sbt@ ${sbt}/bin/sbt \
+      --replace @sourceRev@ "${sourceRev}" \
+      --replace @sourceNarHash@ "${sourceNarHash}" \
+      --replace @sourceUrl@ "${sourceUrl}" \
       ;
     chmod a+x $out/bin/sbtix
   '';
