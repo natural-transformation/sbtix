@@ -10,6 +10,9 @@ let
     version = pluginVersion;
   };
 
+  sbtixPluginJarPath =
+    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
+
   sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
     [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
     [ pluginVersion pluginBootstrapSnippet ]
@@ -54,6 +57,7 @@ let
     substitute ${./src/sbtix.sh} $out/bin/sbtix \
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
+      --replace @pluginJar@ ${sbtixPluginJarPath} \
       --replace @sbt@ ${sbt}/bin/sbt \
       --replace @sourceRev@ "${sourceRev}" \
       --replace @sourceNarHash@ "${sourceNarHash}" \

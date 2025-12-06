@@ -181,10 +181,15 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String): String = {
     val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ")
     val sourceBlock = resolveSbtixSourceBlock(pluginVersion)
+    val pluginJarLine = sys.env
+      .get("SBTIX_PLUGIN_JAR_PATH")
+      .filter(_.nonEmpty)
+      .map(path => s"""      pluginJar="$path"\n""")
+      .getOrElse(sourceBlock.pluginJarLine)
     raw
       .replace("{{PLUGIN_BOOTSTRAP_SNIPPET}}", snippet)
       .replace("{{SBTIX_SOURCE_BLOCK}}", sourceBlock.block)
-      .replace("{{PLUGIN_JAR_LINE}}", sourceBlock.pluginJarLine)
+      .replace("{{PLUGIN_JAR_LINE}}", pluginJarLine)
       .replace("""${plugin-version}""", pluginVersion)
   }
   
@@ -444,7 +449,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
 
       val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
-      val usesStoreBootstrap = rawNixContent.contains(StoreBootstrapMarker)
+      val hasStoreFetcher = rawNixContent.contains(StoreBootstrapMarker)
+      val pluginJarEnv = sys.env.get("SBTIX_PLUGIN_JAR_PATH").filter(_.nonEmpty)
+      log.info(
+        s"[SBTIX_DEBUG genComposition] SBTIX_PLUGIN_JAR_PATH env: ${pluginJarEnv.getOrElse("<unset>")}"
+      )
+      val hasPluginJarEnv = pluginJarEnv.isDefined
+      val usesStoreBootstrap = hasStoreFetcher || hasPluginJarEnv
       val templatedNixContent =
         rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
       if (usesStoreBootstrap)
@@ -583,7 +594,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           log.info(s"[SBTIX_DEBUG genComposition] Written content has ${writtenContent.length} characters")
           
           // Check for IVY_LOCAL_BASE in the file
-          val missingStoreBootstrap = usesStoreBootstrap && !writtenContent.contains(StoreBootstrapMarker)
+          val missingStoreBootstrap = hasStoreFetcher && !writtenContent.contains(StoreBootstrapMarker)
           val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
           val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
           val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
@@ -651,7 +662,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         
         // Check for IVY_LOCAL_BASE in the file
         val writtenContent = IO.read(nixFile)
-        val missingStoreBootstrap = usesStoreBootstrap && !writtenContent.contains(StoreBootstrapMarker)
+        val missingStoreBootstrap = hasStoreFetcher && !writtenContent.contains(StoreBootstrapMarker)
         val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
         val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
         val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")

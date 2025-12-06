@@ -13,6 +13,10 @@ PLUGIN_DIR="${GLOBAL_DIR}/plugins"
 # the sbtix plugin wrapper and avoid hitting system locations like /var/empty.
 mkdir -p "${PLUGIN_DIR}"
 
+# Expose the in-store plugin JAR to any sbt process launched through this
+# wrapper so generated nix expressions can reference it directly.
+export SBTIX_PLUGIN_JAR_PATH="@pluginJar@"
+
 # Also purge cached copies of the sbtix plugin to make sure we always load the
 # freshly built jar from the nix store. Otherwise Ivy may silently reuse an old
 # snapshot, which then misses the latest template fixes.

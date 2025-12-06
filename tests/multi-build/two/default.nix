@@ -14,6 +14,36 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
+  sbtixSourceFetcher = { url, rev, narHash, sha256, ... }@args:
+    if builtins ? fetchTree
+    then builtins.fetchTree (builtins.removeAttrs args [ "sha256" ])
+    else pkgs.fetchgit {
+      inherit url rev sha256;
+    };
+
+  sbtixSource = sbtixSourceFetcher {
+    type = "git";
+    url = "https://github.com/natural-transformation/sbtix";
+    rev = "76d9d74c43f52a7a616b0c94010517feaaa2663b";
+    narHash = "sha256-55Ev2OjMd6PAfp0elqkAW+gfBPi+Xd3D5af9sfGEEKs=";
+    sha256 = "1aqhhkqv3zd7wp1xspdyz021zs2v02lrc7lxgv0a6xycx3c2z4g7";
+  };
+
+  sbtixPluginRepos = [
+    (import (sbtixSource + "/plugin/repo.nix"))
+    (import (sbtixSource + "/plugin/project/repo.nix"))
+    (import (sbtixSource + "/plugin/nix-exprs/manual-repo.nix"))
+  ];
+
+  sbtixPluginIvy = sbtix.buildSbtLibrary {
+    name = "sbtix-plugin";
+    src = cleanSource (sbtixSource + "/plugin");
+    repo = sbtixPluginRepos;
+  };
+
+  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT/jars/sbtix.jar";
+
+
   manualRepo = import ./manual-repo.nix;
   repoLock = import ./repo.nix;
   projectRepo = import ./project/repo.nix;
@@ -34,59 +64,66 @@ let
     then pkgs.callPackage buildInputsPath {}
     else "";
 in
-  sbtix.buildSbtLibrary {
+  sbtix.buildSbtProgram {
     name = "two";
     src = cleanSource (gitignoreLib.gitignoreSource ./.);
     repo = repositories;
-    sbtOptions = "-Dplugin.version=0.4-SNAPSHOT";
+    sbtOptions = "-Dplugin.version=0.1.0-SNAPSHOT";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
-      ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.4-SNAPSHOT"
-      mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
-      if [ -f ./sbtix-plugin-under-test.jar ]; then
-        cp ./sbtix-plugin-under-test.jar $ivyDir/jars/sbtix.jar
-        cat <<POM_EOF > $ivyDir/poms/sbtix-0.4-SNAPSHOT.pom
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>se.nullable.sbtix</groupId>
-  <artifactId>sbtix</artifactId>
-  <version>0.4-SNAPSHOT</version>
-  <name>sbtix Plugin</name>
-  <description>Locally provided sbtix plugin for Nix build</description>
-  <packaging>jar</packaging>
-</project>
-POM_EOF
-        cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
-<ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
-  <info organisation="se.nullable.sbtix"
-        module="sbtix"
-        revision="0.4-SNAPSHOT"
-        status="release"
-        publication="0000000000000"
-        e:sbtVersion="1.0"
-        e:scalaVersion="2.12">
-    <description>
-      sbtix plugin (locally provided for Nix build)
-    </description>
-  </info>
-  <configurations>
-    <conf name="compile" visibility="public" description=""/>
-    <conf name="default" visibility="public" description="" extends="compile"/>
-    <conf name="master" visibility="public" description=""/>
-    <conf name="provided" visibility="public" description=""/>
-    <conf name="runtime" visibility="public" description="" extends="compile"/>
-    <conf name="sources" visibility="public" description=""/>
-    <conf name="test" visibility="public" description="" extends="runtime"/>
-  </configurations>
-  <publications>
-    <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
-  </publications>
-  <dependencies></dependencies>
-</ivy-module>
-IVY_EOF
-        ln -sf ivy.xml $ivyDir/ivys/ivy-0.4-SNAPSHOT.xml
-      fi
+      pluginJar="${sbtixPluginJarPath}"
+
+              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT"
+              mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
+              if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
+                cp "$pluginJar" $ivyDir/jars/sbtix.jar
+              elif [ -f ./sbtix-plugin-under-test.jar ]; then
+                cp ./sbtix-plugin-under-test.jar $ivyDir/jars/sbtix.jar
+              else
+                echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
+                exit 1
+              fi
+              cat <<POM_EOF > $ivyDir/poms/sbtix-0.1.0-SNAPSHOT.pom
+                  <project xmlns="http://maven.apache.org/POM/4.0.0"
+                           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                           xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+                    <modelVersion>4.0.0</modelVersion>
+                    <groupId>se.nullable.sbtix</groupId>
+                    <artifactId>sbtix</artifactId>
+                    <version>0.1.0-SNAPSHOT</version>
+                    <name>sbtix Plugin</name>
+                    <description>Locally provided sbtix plugin for Nix build</description>
+                    <packaging>jar</packaging>
+                  </project>
+              POM_EOF
+              cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
+                  <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
+                    <info organisation="se.nullable.sbtix"
+                          module="sbtix"
+                          revision="0.1.0-SNAPSHOT"
+                          status="release"
+                          publication="1765054488072"
+                          e:sbtVersion="1.0"
+                          e:scalaVersion="2.12">
+                      <description>
+                        sbtix plugin (locally provided for Nix build)
+                      </description>
+                    </info>
+                    <configurations>
+                      <conf name="compile" visibility="public" description=""/>
+                      <conf name="default" visibility="public" description="" extends="compile"/>
+                      <conf name="master" visibility="public" description=""/>
+                      <conf name="provided" visibility="public" description=""/>
+                      <conf name="runtime" visibility="public" description="" extends="compile"/>
+                      <conf name="sources" visibility="public" description=""/>
+                      <conf name="test" visibility="public" description="" extends="runtime"/>
+                    </configurations>
+                    <publications>
+                      <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
+                    </publications>
+                    <dependencies></dependencies>
+                  </ivy-module>
+              IVY_EOF
+              ln -sf ivy.xml $ivyDir/ivys/ivy-0.1.0-SNAPSHOT.xml
     '';
   }
