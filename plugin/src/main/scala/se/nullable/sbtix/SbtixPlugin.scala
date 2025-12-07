@@ -37,7 +37,9 @@ object SbtixPlugin extends AutoPlugin {
   }
 
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
-  private val DefaultNixTemplateResource = "/sbtix/default.nix.template"
+  private val SampleDefaultTemplateResource = "/sbtix/default.nix.template"
+  private val GeneratedNixTemplateResource = "/sbtix/generated.nix.template"
+  private val GeneratedNixFileName = "sbtix-generated.nix"
   private val StoreBootstrapMarker = "sbtixSourceFetcher = {"
   
   private def indentMultiline(text: String, indent: String): String =
@@ -268,30 +270,36 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   override def requires = JvmPlugin
   override def trigger = allRequirements
   
-  private def loadDefaultNixTemplate(): String = {
-    val stream = Option(getClass.getResourceAsStream(DefaultNixTemplateResource))
-      .getOrElse(throw new IllegalStateException(s"Missing resource $DefaultNixTemplateResource"))
+  private def loadResource(path: String): String = {
+    val stream = Option(getClass.getResourceAsStream(path))
+      .getOrElse(throw new IllegalStateException(s"Missing resource $path"))
     val source = Source.fromInputStream(stream, StandardCharsets.UTF_8.name())
     try source.mkString
     finally source.close()
   }
 
-  // Default implementation for the Nix content template
+  private def loadGeneratedNixTemplate(): String =
+    loadResource(GeneratedNixTemplateResource)
+
+  private def loadSampleDefaultTemplate(): String =
+    loadResource(SampleDefaultTemplateResource)
+
+  // Default implementation for the generated nix content template
   // This version uses absolute paths for ivyDir to ensure compatibility with all environments
-  /** Replaces `default.nix` placeholders with versioned data plus the bootstrap
+  /** Replaces `sbtix-generated.nix` placeholders with versioned data plus the bootstrap
     * snippet above. Keeping the string replacement here ensures every template
     * consumer (scripted tests, `sbtix genComposition`, integration fixtures) sees
     * the same content without rerunning extra tooling.
     */
-  private def defaultNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String): String = {
+  private def generatedNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String): String = {
     val timestamp = System.currentTimeMillis().toString
-    val templated =
-      renderSbtixTemplate(loadDefaultNixTemplate(), currentPluginVersion, timestamp)
-        .replace("{{PLUGIN_VERSION}}", currentPluginVersion)
-        .replace("{{SBT_BUILD_VERSION}}", sbtBuildVersion)
-
-    templated
+    renderSbtixTemplate(loadGeneratedNixTemplate(), currentPluginVersion, timestamp)
+      .replace("{{PLUGIN_VERSION}}", currentPluginVersion)
+      .replace("{{SBT_BUILD_VERSION}}", sbtBuildVersion)
   }
+  
+  private lazy val sampleDefaultTemplate: String =
+    loadSampleDefaultTemplate()
   
   override lazy val projectSettings = Seq(
     genNixProjectDir := baseDirectory.value,
@@ -300,8 +308,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     
     sbtixRepository := "https://repo1.maven.org/maven2",
     
-    // Setting the default template for Nix content
-    sbtixNixContentTemplate := defaultNixContentTemplate _,
+    // Setting the default template for generated Nix content
+    sbtixNixContentTemplate := generatedNixContentTemplate _,
     
     sbtixBuildInputs := {
       val log = streams.value.log
@@ -564,131 +572,24 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       }
       
       // Check if there's an expected default.nix file we should use
+      val generatedNixFile = new File(genNixProjectDir.value, GeneratedNixFileName)
+      IO.write(generatedNixFile, templatedNixContent)
+      log.info(s"[SBTIX_DEBUG genComposition] Wrote sbtix-generated file to ${generatedNixFile.getAbsolutePath}")
+
       val expectedDir = new File(currentProjectBaseDir, "expected")
       val expectedDefaultNix = new File(expectedDir, "default.nix")
-      val nixFile = new File(genNixProjectDir.value, "default.nix")
-      
-      log.info(s"[SBTIX_DEBUG genComposition] Expected dir exists: ${expectedDir.exists()}, expected default.nix exists: ${expectedDefaultNix.exists()}")
-      
-      // Use the template to generate the nixContent regardless of whether we'll use it or not
-     
+      val defaultNixFile = new File(genNixProjectDir.value, "default.nix")
+
       if (expectedDefaultNix.exists()) {
-        // Use the expected default.nix for testing
         log.info(s"[SBTIX_DEBUG genComposition] Using expected default.nix from ${expectedDefaultNix.getAbsolutePath}")
-        log.info(s"[SBTIX_DEBUG genComposition] Copying to target: ${nixFile.getAbsolutePath}")
-        
-        try {
-            val content = IO.read(expectedDefaultNix)
-          log.info(s"[SBTIX_DEBUG genComposition] Expected content has ${content.length} characters and begins with: ${content.take(50)}...")
-          
-          // Make sure there's no IVY_LOCAL_BASE in the content
-          val fixedContent = content.replaceAll("\\$\\{IVY_LOCAL_BASE\\}", "\\$ivyDir")
-                                   .replaceAll("export IVY_LOCAL_BASE=", "ivyDir=")
-          
-          if (content != fixedContent) {
-            log.warn("[SBTIX_DEBUG genComposition] Found and fixed IVY_LOCAL_BASE references in expected file")
-          }
-          
-          IO.write(nixFile, fixedContent)
-          
-          // Double check the content was copied
-          val writtenContent = IO.read(nixFile)
-          log.info(s"[SBTIX_DEBUG genComposition] Written content has ${writtenContent.length} characters")
-          
-          // Check for IVY_LOCAL_BASE in the file
-          val missingStoreBootstrap = hasStoreFetcher && !writtenContent.contains(StoreBootstrapMarker)
-          val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
-          val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
-          val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
-          val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
-          val legacyGitignoreCall =
-            writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
-            writtenContent.contains("cleanSource (gitignore ./.);")
-
-          if (missingStoreBootstrap || legacyPluginJarLine) {
-            log.warn("[SBTIX_DEBUG genComposition] default.nix missing store-backed sbtix bootstrap; rewriting from template.")
-            IO.write(nixFile, templatedNixContent)
-          } else if (writtenContent.contains("IVY_LOCAL_BASE")) {
-            log.error("[SBTIX_DEBUG genComposition] ERROR: The copied file still contains IVY_LOCAL_BASE references")
-            val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
-            log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")
-            log.info("[SBTIX_DEBUG genComposition] Falling back to using our clean template-generated content")
-            IO.write(nixFile, templatedNixContent)
-          } else if (missingPluginRepo || legacyBuildInputs || legacyGitignoreParam || legacyGitignoreCall) {
-            log.warn("[SBTIX_DEBUG genComposition] default.nix lacks sbtix bootstrap wiring (plugin repo, optional build-inputs, or gitignore shim); rewriting from template.")
-            IO.write(nixFile, templatedNixContent)
-          } else {
-            log.info("[SBTIX_DEBUG genComposition] The generated file is clean (no IVY_LOCAL_BASE references)")
-          }
-        } catch {
-          case e: Exception => 
-            log.error(s"[SBTIX_DEBUG genComposition] Error copying expected file: ${e.getMessage}")
-            e.printStackTrace()
-            
-            // Fall back to using our template
-            log.info("[SBTIX_DEBUG genComposition] Falling back to using our template due to error")
-            IO.write(nixFile, templatedNixContent)
-        }
+        IO.copyFile(expectedDefaultNix, defaultNixFile)
+      } else if (!defaultNixFile.exists()) {
+        val defaultContent = sampleDefaultTemplate.replace("{{GENERATED_FILE}}", GeneratedNixFileName)
+        IO.write(defaultNixFile, defaultContent)
+        log.info(s"[SBTIX_DEBUG genComposition] Generated example default.nix at ${defaultNixFile.getAbsolutePath}")
       } else {
-        // Try to check if there's a default.nix we should clean up
-        val existingDefaultNix = nixFile.exists()
-        if (existingDefaultNix) {
-          log.info(s"[SBTIX_DEBUG genComposition] Found existing default.nix at: ${nixFile.getAbsolutePath}")
-          try {
-            val content = IO.read(nixFile)
-            if (content.contains("IVY_LOCAL_BASE")) {
-              log.warn("[SBTIX_DEBUG genComposition] Found IVY_LOCAL_BASE references in existing default.nix, fixing...")
-              val fixedContent = content.replaceAll("\\$\\{IVY_LOCAL_BASE\\}", "\\$ivyDir")
-                                     .replaceAll("export IVY_LOCAL_BASE=", "ivyDir=")
-              IO.write(nixFile, fixedContent)
-              
-              // Double check if the fix worked
-              val afterContent = IO.read(nixFile)
-              if (afterContent.contains("IVY_LOCAL_BASE")) {
-                log.error("[SBTIX_DEBUG genComposition] Failed to fix IVY_LOCAL_BASE references, using our clean template")
-                IO.write(nixFile, templatedNixContent)
-              }
-            }
-          } catch {
-            case e: Exception => 
-              log.error(s"[SBTIX_DEBUG genComposition] Error fixing existing default.nix: ${e.getMessage}")
-              // Fall back to using our template
-              log.info("[SBTIX_DEBUG genComposition] Falling back to using our template due to error")
-              IO.write(nixFile, templatedNixContent)
-          }
-        } else {
-          // No existing file, generate one from our template
-          log.info(s"[SBTIX_DEBUG genComposition] Generating default.nix from template")
-          IO.write(nixFile, templatedNixContent)
-        }
-        
-        // Check for IVY_LOCAL_BASE in the file
-        val writtenContent = IO.read(nixFile)
-        val missingStoreBootstrap = hasStoreFetcher && !writtenContent.contains(StoreBootstrapMarker)
-        val legacyPluginJarLine = writtenContent.contains("pluginJar=\"$${sbtixPluginJarPath}\"")
-        val missingPluginRepo = !writtenContent.contains("sbtix-plugin-repo.nix")
-        val legacyBuildInputs = writtenContent.contains("sbtixBuildInputs = pkgs.callPackage ./sbtix-build-inputs.nix")
-        val legacyGitignoreParam = writtenContent.contains("gitignore ? (let")
-        val legacyGitignoreCall =
-          writtenContent.contains("cleanSource (gitignoreLib ./.);") ||
-          writtenContent.contains("cleanSource (gitignore ./.);")
-
-        if (missingStoreBootstrap || legacyPluginJarLine) {
-          log.warn("[SBTIX_DEBUG genComposition] default.nix missing store-backed sbtix bootstrap; regenerating from template.")
-          IO.write(nixFile, templatedNixContent)
-        } else if (writtenContent.contains("IVY_LOCAL_BASE")) {
-          log.error("[SBTIX_DEBUG genComposition] ERROR: The generated file contains IVY_LOCAL_BASE references")
-          val linesBefore = writtenContent.split("\n").zipWithIndex.filter(_._1.contains("IVY_LOCAL_BASE")).map(l => s"${l._2+1}: ${l._1}").mkString("\n")
-          log.error(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$linesBefore")
-        } else if (missingPluginRepo || legacyBuildInputs || legacyGitignoreParam || legacyGitignoreCall) {
-          log.warn("[SBTIX_DEBUG genComposition] Generated default.nix missing sbtix bootstrap wiring; regenerating from template.")
-          IO.write(nixFile, templatedNixContent)
-        } else {
-          log.info("[SBTIX_DEBUG genComposition] The generated file is clean (no IVY_LOCAL_BASE references)")
-        }
+        log.info(s"[SBTIX_DEBUG genComposition] default.nix already exists; leaving it untouched")
       }
-      
-      log.info(s"Wrote Nix composition file to ${nixFile.getAbsolutePath}")
 
       // Ensure sbtix.nix is present (copy from expected file or packaged template)
       val expectedSbtixNix = new File(expectedDir, "sbtix.nix")
@@ -835,47 +736,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Automatically fix any IVY_LOCAL_BASE references in the generated file to use ivyDir
       // This ensures compatibility regardless of which template or source is used
       try {
-        if (nixFile.exists()) {
-          log.info(s"[SBTIX_DEBUG genComposition] Checking for IVY_LOCAL_BASE references in ${nixFile.getAbsolutePath}")
-          val content = IO.read(nixFile)
-          log.info(s"[SBTIX_DEBUG genComposition] Content has ${content.length} chars")
-          
-          if (content.contains("IVY_LOCAL_BASE")) {
-            log.info(s"[SBTIX_DEBUG genComposition] Found IVY_LOCAL_BASE references in ${nixFile.getAbsolutePath}")
-            
-            // Log the problematic lines
-            val problematicLines = content.split("\n").zipWithIndex
-              .filter(_._1.contains("IVY_LOCAL_BASE"))
-              .map(l => s"${l._2+1}: ${l._1}")
-              .mkString("\n")
-            log.info(s"[SBTIX_DEBUG genComposition] Problematic lines:\n$problematicLines")
-            
-            // Use a more aggressive approach to fix all IVY_LOCAL_BASE references
-            val fixedContent = content
-              .replace("${IVY_LOCAL_BASE}", "$ivyDir") // Replace interpolated variable
-              .replace("$IVY_LOCAL_BASE", "$ivyDir") // Replace non-interpolated variable
-              .replace("export IVY_LOCAL_BASE=", "ivyDir=") // Replace environment variable definition
-              .replace("IVY_LOCAL_BASE", "ivyDir") // Replace all remaining references
-            
-            IO.write(nixFile, fixedContent)
-            
-            val newContent = IO.read(nixFile)
-            if (newContent.contains("IVY_LOCAL_BASE")) {
-              log.warn(s"[SBTIX_DEBUG genComposition] Failed to fix all IVY_LOCAL_BASE references in ${nixFile.getAbsolutePath}")
-              
-              // Log the remaining problematic lines
-              val remainingLines = newContent.split("\n").zipWithIndex
-                .filter(_._1.contains("IVY_LOCAL_BASE"))
-                .map(l => s"${l._2+1}: ${l._1}")
-                .mkString("\n")
-              log.warn(s"[SBTIX_DEBUG genComposition] Remaining problematic lines:\n$remainingLines")
-            } else {
-              log.info(s"[SBTIX_DEBUG genComposition] Successfully fixed all IVY_LOCAL_BASE references")
-            }
-          } else {
-            log.info(s"[SBTIX_DEBUG genComposition] No IVY_LOCAL_BASE references found in ${nixFile.getAbsolutePath}")
-          }
-        }
+
       } catch {
         case e: Exception => 
           log.error(s"[SBTIX_DEBUG genComposition] Error fixing IVY_LOCAL_BASE references: ${e.getMessage}")

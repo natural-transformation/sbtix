@@ -12,7 +12,7 @@ When you touch `plugin/src/main/resources/sbtix/default.nix.template`, regenerat
 (cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=0.4-SNAPSHOT "clean" "genNix" "genComposition")
 ```
 
-and copying the resulting `default.nix` back into `expected/default.nix`. Repeat for any other scripted test that asserts on `default.nix` (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.  
+and copying the resulting `sbtix-generated.nix` (and example `default.nix` if you removed it) back into `expected/**`. Repeat for any other scripted test that asserts on the generated files (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.  
 If you are running from a dirty sbtix checkout, remember to set the variables described in “Local sbtix checkouts” first.
 
 ## Updating the plugin's Nix lockfiles
@@ -25,7 +25,7 @@ nix build '.#sbtix'
 
 cd plugin
 ../result/bin/sbtix genNix          # refreshes plugin/repo.nix and plugin/project/repo.nix
-../result/bin/sbtix genComposition  # refreshes plugin/default.nix if needed
+../result/bin/sbtix genComposition  # refreshes plugin/sbtix-generated.nix and sample default.nix if needed
 ../result/bin/sbtix-gen-all2        # produces project/project/repo.nix
 ```
 
@@ -43,7 +43,7 @@ export PATH="$PWD/result/bin:$PATH"
 ./tests/template-generation/run.sh
 ```
 
-Whenever the template or bootstrap snippet changes, rerun the commands above and copy the regenerated `default.nix` (and related `.nix` snippets) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
+Whenever the template or bootstrap snippet changes, rerun the commands above and copy the regenerated `sbtix-generated.nix` (and the example `default.nix` if you removed it) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
 
 #### CI preview
 
@@ -59,7 +59,7 @@ You can find the tests through tab completion.
 ### Local sbtix checkouts (optional)
 
 Normal development uses the released sbtix build (`nix shell github:natural-transformation/sbtix` or `nix build '.#sbtix'`), so no extra environment is required.  
-If you need to exercise unmerged changes directly from your working tree, export the following once per shell so generated `default.nix` files can fetch the exact same revision:
+If you need to exercise unmerged changes directly from your working tree, export the following once per shell so generated files can fetch the exact same revision:
 
 ```bash
 export SBTIX_SOURCE_URL="https://github.com/natural-transformation/sbtix"
