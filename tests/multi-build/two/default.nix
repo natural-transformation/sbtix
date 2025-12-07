@@ -13,6 +13,7 @@
 let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
+  pluginVersion = "0.4-SNAPSHOT";
 
   sbtixSourceFetcher = { url, rev, narHash, sha256, ... }@args:
     if builtins ? fetchTree
@@ -25,8 +26,8 @@ let
     type = "git";
     url = "https://github.com/natural-transformation/sbtix";
     rev = "76d9d74c43f52a7a616b0c94010517feaaa2663b";
-    narHash = "sha256-55Ev2OjMd6PAfp0elqkAW+gfBPi+Xd3D5af9sfGEEKs=";
-    sha256 = "1aqhhkqv3zd7wp1xspdyz021zs2v02lrc7lxgv0a6xycx3c2z4g7";
+    narHash = "sha256-Is60tmh4697ogc2HTagMOxHxg4JqPBdk3FaFzCw20TU=";
+    sha256 = "0dfi6qncr1anvij1fg3aha1z249v1jl4v1ydh7ldxsvqd2vb9ki2";
   };
 
   sbtixPluginRepos = [
@@ -41,7 +42,7 @@ let
     repo = sbtixPluginRepos;
   };
 
-  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT/jars/sbtix.jar";
+  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
 
 
   manualRepo = import ./manual-repo.nix;
@@ -68,12 +69,13 @@ in
     name = "two";
     src = cleanSource (gitignoreLib.gitignoreSource ./.);
     repo = repositories;
-    sbtOptions = "-Dplugin.version=0.1.0-SNAPSHOT";
+    sbtOptions = "-Dplugin.version=${pluginVersion}";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
+      pluginVersion="${pluginVersion}"
 
-              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT"
+              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
               mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
               if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
                 cp "$pluginJar" $ivyDir/jars/sbtix.jar
@@ -83,14 +85,14 @@ in
                 echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
                 exit 1
               fi
-              cat <<POM_EOF > $ivyDir/poms/sbtix-0.1.0-SNAPSHOT.pom
+              cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
                   <project xmlns="http://maven.apache.org/POM/4.0.0"
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
                     <groupId>se.nullable.sbtix</groupId>
                     <artifactId>sbtix</artifactId>
-                    <version>0.1.0-SNAPSHOT</version>
+                    <version>${pluginVersion}</version>
                     <name>sbtix Plugin</name>
                     <description>Locally provided sbtix plugin for Nix build</description>
                     <packaging>jar</packaging>
@@ -100,7 +102,7 @@ in
                   <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
                     <info organisation="se.nullable.sbtix"
                           module="sbtix"
-                          revision="0.1.0-SNAPSHOT"
+                          revision="${pluginVersion}"
                           status="release"
                           publication="1765054488072"
                           e:sbtVersion="1.0"
@@ -124,6 +126,6 @@ in
                     <dependencies></dependencies>
                   </ivy-module>
               IVY_EOF
-              ln -sf ivy.xml $ivyDir/ivys/ivy-0.1.0-SNAPSHOT.xml
+              ln -sf ivy.xml $ivyDir/ivys/ivy-${pluginVersion}.xml
     '';
   }
