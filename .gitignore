@@ -19,5 +19,3 @@ metals.sbt
 .sbt-global
 .coursier-cache
 .ivy2-home
-
-tests/template-generation/default.nix

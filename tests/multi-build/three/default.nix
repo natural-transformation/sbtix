@@ -71,7 +71,7 @@ in
     sbtOptions = "-Dplugin.version=0.1.0-SNAPSHOT";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
-      pluginJar="/nix/store/c00gacgpdm2gwzzq5y21zm9fnqz5zlly-sbtix-plugin/plugin-repo/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.4-SNAPSHOT/jars/sbtix.jar"
+      pluginJar="${sbtixPluginJarPath}"
 
               ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT"
               mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"

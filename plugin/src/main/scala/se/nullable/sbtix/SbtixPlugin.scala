@@ -181,11 +181,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String): String = {
     val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ")
     val sourceBlock = resolveSbtixSourceBlock(pluginVersion)
-    val pluginJarLine = sys.env
+    val pluginJarEnvLine = sys.env
       .get("SBTIX_PLUGIN_JAR_PATH")
       .filter(_.nonEmpty)
       .map(path => s"""      pluginJar="$path"\n""")
-      .getOrElse(sourceBlock.pluginJarLine)
+    val pluginJarLine =
+      if (sourceBlock.block.nonEmpty) sourceBlock.pluginJarLine
+      else pluginJarEnvLine.getOrElse("")
     raw
       .replace("{{PLUGIN_BOOTSTRAP_SNIPPET}}", snippet)
       .replace("{{SBTIX_SOURCE_BLOCK}}", sourceBlock.block)
