@@ -62,7 +62,8 @@ class CoursierArtifactFetcher(
   resolvers: Set[Resolver],
   credentials: Set[Credentials],
   scalaVersion: String,
-  scalaBinaryVersion: String
+  scalaBinaryVersion: String,
+  extraIvyProps: Map[String, String] = Map.empty
 ) {
 
   private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
@@ -178,26 +179,18 @@ class CoursierArtifactFetcher(
     * for artifacts like `com.github.sbt:sbt-native-packager`.
     */
   private def resolveModuleName(modId: ModuleID): String = {
-    val maybeSbtVersion = modId.extraAttributes.get("e:sbtVersion")
-    maybeSbtVersion match {
-      case Some(sbtVer) =>
-        val scalaSegment =
-          modId.extraAttributes
-            .get("e:scalaVersion")
-            .map(CrossVersion.binaryScalaVersion)
-            .getOrElse(scalaBinaryVersion)
-        val sbtSegment = binarySbtVersion(sbtVer)
-        s"${modId.name}_${scalaSegment}_${sbtSegment}"
-      case None =>
-        CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
-          .map(applyFn => applyFn(modId.name))
-          .getOrElse(modId.name)
+    val hasSbtVersionAttr =
+      modId.extraAttributes.contains("sbtVersion") || modId.extraAttributes.contains("e:sbtVersion")
+    if (hasSbtVersionAttr) {
+        // Resolver.sbtPluginRepo already encodes the scala/sbt binary versions
+        // in its Ivy pattern; keeping the canonical module name ensures URLs
+        // match what Artifactory serves.
+        modId.name
+    } else {
+      CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
+        .map(applyFn => applyFn(modId.name))
+        .getOrElse(modId.name)
     }
-  }
-
-  private def binarySbtVersion(version: String): String = {
-    val parts = version.split("[\\.-]", 3)
-    if (parts.length >= 2) s"${parts(0)}.${parts(1)}" else version
   }
 
   private def downloadArtifact(artifact: CArtifact): Option[File] =
@@ -565,7 +558,7 @@ class CoursierArtifactFetcher(
     }
 
   private def ivyProps: Map[String, String] =
-    Map("ivy.home" -> new File(sys.props("user.home"), ".ivy2").toString) ++ sys.props
+    Map("ivy.home" -> new File(sys.props("user.home"), ".ivy2").toString) ++ sys.props ++ extraIvyProps
 
   private val ivyLocalDir = new File(new File(sys.props("user.home"), ".ivy2"), "local")
   private val ivyLocalCanonical = ivyLocalDir.getCanonicalFile

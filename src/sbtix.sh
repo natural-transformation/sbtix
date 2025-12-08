@@ -41,5 +41,29 @@ if [ -n "${SBTIX_SOURCE_REV:-}" ] && [ -n "${SBTIX_SOURCE_NAR_HASH:-}" ]; then
   export SBT_OPTS="$SBT_OPTS -Dsbtix.sourceUrl=$sourceUrl -Dsbtix.sourceRev=$SBTIX_SOURCE_REV -Dsbtix.sourceNarHash=$SBTIX_SOURCE_NAR_HASH"
 fi
 
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    genNix)
+      # Run genNix for the main build, reload into the meta-build to capture
+      # plugin dependencies, then return to the main build.
+      set -- \
+        genNix \
+        "reload plugins" \
+        genNix \
+        "reload return"
+      ;;
+    genComposition)
+      # Ensure both the project and meta-build repos are up-to-date before
+      # emitting sbtix-generated.nix.
+      set -- \
+        genNix \
+        "reload plugins" \
+        genNix \
+        "reload return" \
+        genComposition
+      ;;
+  esac
+fi
+
 exec @sbt@ "$@"
 

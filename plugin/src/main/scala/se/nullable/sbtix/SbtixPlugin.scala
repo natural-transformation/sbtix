@@ -3,6 +3,7 @@ package se.nullable.sbtix
 import coursier.core.Repository
 import sbt._
 import sbt.Keys._
+import sbt.librarymanagement.{ CrossVersion, Patterns }
 import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
@@ -101,6 +102,13 @@ object SbtixPlugin extends AutoPlugin {
     */
   private case class SourceBlock(block: String, pluginJarLine: String)
 
+  // The plugin version we should bake into generated Nix. Relying on
+  // `version.value` inside a user build would pick up the *project's* version,
+  // not the plugin's. The manifest carries the plugin version, so prefer that
+  // and fall back to the known snapshot we ship from Nix.
+  private lazy val thisPluginVersion: String =
+    Option(getClass.getPackage.getImplementationVersion).filter(_.nonEmpty).getOrElse("0.4-SNAPSHOT")
+
   private def resolveSbtixSourceBlock(pluginVersion: String): SourceBlock = {
     def fromEnvOrProp(envKey: String, propKey: String): Option[String] =
       sys.props.get(propKey).filter(_.nonEmpty).orElse(sys.env.get(envKey))
@@ -144,7 +152,11 @@ object SbtixPlugin extends AutoPlugin {
              |    repo = sbtixPluginRepos;
              |  };
              |
-             |  sbtixPluginJarPath = "$${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/$pluginVersion/jars/sbtix.jar";
+             |  pluginVersion =
+             |    let versions = builtins.attrNames (builtins.readDir "${"$"}{sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0");
+             |    in builtins.head versions;
+             |
+             |  sbtixPluginJarPath = "${"$"}{sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${"$"}{pluginVersion}/jars/sbtix.jar";
              |""".stripMargin
         SourceBlock(block, "      pluginJar=\"${sbtixPluginJarPath}\"\n")
       case _ =>
@@ -190,10 +202,15 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val pluginJarLine =
       if (sourceBlock.block.nonEmpty) sourceBlock.pluginJarLine
       else pluginJarEnvLine.getOrElse("")
+    val pluginVersionReplacement =
+      if (sourceBlock.block.nonEmpty) "${pluginVersion}"
+      else pluginVersion
+
     raw
       .replace("{{PLUGIN_BOOTSTRAP_SNIPPET}}", snippet)
       .replace("{{SBTIX_SOURCE_BLOCK}}", sourceBlock.block)
       .replace("{{PLUGIN_JAR_LINE}}", pluginJarLine)
+      .replace("{{PLUGIN_VERSION}}", pluginVersionReplacement)
       .replace("""${plugin-version}""", pluginVersion)
   }
   
@@ -301,6 +318,62 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private lazy val sampleDefaultTemplate: String =
     loadSampleDefaultTemplate()
   
+  private def declaredPlugins(
+      baseDir: File,
+      scalaBinary: String,
+      sbtBinary: String,
+      log: Logger
+  ): Set[ModuleID] = {
+    @annotation.tailrec
+    def collect(dir: File, acc: List[File]): List[File] = {
+      if (dir == null) acc
+      else {
+        val candidate = new File(dir, "project/plugins.sbt")
+        val nextAcc = if (candidate.exists()) candidate :: acc else acc
+        collect(dir.getParentFile, nextAcc)
+      }
+    }
+
+    val pluginFiles = collect(baseDir, Nil)
+    pluginFiles.headOption
+      .map { pluginsFile =>
+        log.info(s"[SBTIX_DEBUG] Using plugins.sbt at ${pluginsFile.getAbsolutePath}")
+        pluginFiles.tail match {
+          case Nil => ()
+          case rest =>
+            log.info(
+              s"[SBTIX_DEBUG] Ignoring additional plugins.sbt candidates: ${rest.map(_.getAbsolutePath).mkString(", ")}"
+            )
+        }
+        IO.read(pluginsFile)
+          .split("\n")
+          .flatMap { line =>
+            val trimmed = line.trim
+            if (trimmed.startsWith("addSbtPlugin")) {
+              val parts = trimmed.split('"')
+              if (parts.length >= 6) {
+                val org = parts(1).trim
+                val rawModule = parts(3).trim
+                val version = parts(5).trim
+                val attrs = Map(
+                  "scalaVersion" -> scalaBinary,
+                  "sbtVersion" -> sbtBinary,
+                  // Keep the namespaced keys that some tools emit, to cover both patterns.
+                  "e:scalaVersion" -> scalaBinary,
+                  "e:sbtVersion" -> sbtBinary
+                )
+                Some(ModuleID(org, rawModule, version).withExtraAttributes(attrs))
+              } else None
+            } else None
+          }
+          .toSet
+      }
+      .getOrElse {
+        log.info(s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}")
+        Set.empty
+      }
+  }
+  
   override lazy val projectSettings = Seq(
     genNixProjectDir := baseDirectory.value,
     
@@ -373,6 +446,65 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val (repos, artifacts, provided, errors) = fetcher(dependencies)
       logProvidedArtifacts(log, "sbtixGenerate", provided)
       logResolutionDiagnostics(log, "sbtixGenerate", errors)
+
+      val pluginFetchResult: Option[(String, Set[NixRepo], Set[NixArtifact])] = {
+        val buildUnit = loadedBuild.value.units(thisProjectRef.value.build).unit
+        val pluginData = buildUnit.plugins.pluginData
+        val pluginScalaFullVersion = appConfiguration.value.provider.scalaProvider.version
+        val pluginScalaBinary = CrossVersion.binaryScalaVersion(pluginScalaFullVersion)
+        val pluginModuleIds =
+          declaredPlugins((LocalRootProject / baseDirectory).value, pluginScalaBinary, sbtBinaryVersion.value, log)
+        log.info(s"[SBTIX_DEBUG] Parsed ${pluginModuleIds.size} sbt plugins from project/plugins.sbt")
+        if (pluginModuleIds.nonEmpty) {
+          val pluginResolvers =
+            pluginData.resolvers.map(_.toSet).getOrElse(Set.empty[Resolver])
+          val pluginIvyPattern =
+            "[organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
+          val defaultPluginResolvers: Set[Resolver] = {
+            val mavenPattern = "[organization]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]"
+            Set(
+              Resolver.sbtPluginRepo("releases"),
+              Resolver.url(
+                "sbt-plugin-releases",
+                sbt.url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+              )(Patterns(pluginIvyPattern)),
+              Resolver.url(
+                "artima-maven",
+                sbt.url("https://repo.artima.com/releases")
+              )(Patterns(mavenPattern))
+            )
+          }
+          log.info(s"[SBTIX_DEBUG] Plugin classpath contains ${pluginModuleIds.size} plugin modules")
+          log.info(
+            pluginModuleIds
+              .toSeq
+              .sortBy(m => s"${m.organization}:${m.name}")
+              .map(m => s"${m.organization}:${m.name}:${m.revision}")
+              .mkString("[SBTIX_DEBUG] Plugin modules => ", ", ", "")
+          )
+          val pluginFetcher = new CoursierArtifactFetcher(
+            log,
+            pluginResolvers ++ projectResolvers ++ defaultPluginResolvers,
+            projectCredentials,
+            scalaVer,
+            scalaBinaryVersion.value,
+            extraIvyProps = Map(
+              "scalaVersion" -> scalaBinaryVersion.value,
+              "scalaBinaryVersion" -> scalaBinaryVersion.value,
+              "sbtVersion" -> sbtBinaryVersion.value,
+              "sbtBinaryVersion" -> sbtBinaryVersion.value
+            )
+          )
+          val pluginDependencies = pluginModuleIds.map(Dependency(_))
+          val (pluginRepos, pluginArtifacts, pluginProvided, pluginErrors) =
+            pluginFetcher(pluginDependencies)
+          logProvidedArtifacts(log, "sbtixGenerate (plugin)", pluginProvided)
+          logResolutionDiagnostics(log, "sbtixGenerate (plugin)", pluginErrors)
+          if (pluginRepos.nonEmpty || pluginArtifacts.nonEmpty)
+            Some((scalaVer, pluginRepos, pluginArtifacts))
+          else None
+        } else None
+      }
       
       // Generate the Nix expressions and write to files
       val currentBase = baseDirectory.value
@@ -403,9 +535,14 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           log.info(s"[SBTIX_DEBUG] Using expected project-repo.nix from ${expectedProjectRepoFile.getAbsolutePath}")
           IO.copyFile(expectedProjectRepoFile, projectRepoFile)
         case None =>
-          log.info(s"[SBTIX_DEBUG] Expected project-repo.nix not found for ${baseDirectory.value}, generating file")
-          // Create a dummy file with the right format
-          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
+          pluginFetchResult match {
+            case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
+              log.info(s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts")
+              IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
+            case _ =>
+              log.info(s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo")
+              IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
+          }
       }
       
       log.info(s"Wrote plugin repository definitions to ${projectRepoFile}")
@@ -454,7 +591,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         log.info(s"[SBTIX_DEBUG genComposition] Files in ${currentProjectBaseDir.getAbsolutePath}: [${filesInCurrentDir}]")
       } catch { case e: Exception => log.warn(s"[SBTIX_DEBUG genComposition] Error listing files: ${e.getMessage}") }
 
-      val currentPluginVersion = sys.props.getOrElse("plugin.version", version.value)
+      // Always use the sbtix plugin's own version; do not inherit the user's
+      // project version (which would corrupt the plugin Ivy coordinates).
+      val currentPluginVersion = thisPluginVersion
       val bootstrapTimestamp = System.currentTimeMillis().toString
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
 
