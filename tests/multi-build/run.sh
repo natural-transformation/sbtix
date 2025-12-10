@@ -34,6 +34,11 @@ done
 pushd one
 sbt --error publishLocal
 sbtix-gen-all2
+# Regression guard: sbt-native-packager pulls these plugin transitive deps;
+# if they disappear from the generated plugin repo, Nix will try to fetch
+# them online and CI will fail. Keep this fast, explicit check to fail early.
+grep -q 'junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom' project/project/repo.nix
+grep -q 'commons-lang3/3.16.0/commons-lang3-3.16.0.pom' project/project/repo.nix
 popd
 
 pushd two
@@ -45,4 +50,6 @@ pushd three
 sbtix-gen-all2
 nix-build
 ./result/bin/mb-three
+grep -q 'junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom' project/project/repo.nix
+grep -q 'commons-lang3/3.16.0/commons-lang3-3.16.0.pom' project/project/repo.nix
 popd

@@ -164,10 +164,10 @@ object SbtixPlugin extends AutoPlugin {
     }
   }
 
-  private def pluginBootstrapBody(version: String, timestamp: String): String = {
+  private def pluginBootstrapBody(version: String, timestamp: String, scalaBin: String, sbtBin: String): String = {
     val pom = indentMultiline(pluginPomXml(version), "    ")
     val ivy = indentMultiline(pluginIvyXml(version, timestamp), "    ")
-    s"""ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/$version"
+    s"""ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_${scalaBin}/sbt_${sbtBin}/$version"
 mkdir -p "$$ivyDir/jars" "$$ivyDir/ivys" "$$ivyDir/poms"
 if [ -n "$${pluginJar:-}" ] && [ -f "$$pluginJar" ]; then
   cp "$$pluginJar" $$ivyDir/jars/sbtix.jar
@@ -187,11 +187,11 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   /** Indents the bootstrap script so it drops cleanly into the templated heredoc
     * inside our Nix expressions.
     */
-  private def pluginBootstrapSnippet(version: String, timestamp: String, indent: String): String =
-    indentMultiline(pluginBootstrapBody(version, timestamp), indent)
+  private def pluginBootstrapSnippet(version: String, timestamp: String, indent: String, scalaBin: String, sbtBin: String): String =
+    indentMultiline(pluginBootstrapBody(version, timestamp, scalaBin, sbtBin), indent)
 
-  private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String): String = {
-    val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ")
+  private def renderSbtixTemplate(raw: String, pluginVersion: String, timestamp: String, scalaBin: String, sbtBin: String): String = {
+    val snippet = pluginBootstrapSnippet(pluginVersion, timestamp, "              ", scalaBin, sbtBin)
     val sourceBlock = resolveSbtixSourceBlock(pluginVersion)
     val pluginJarEnvLine = sys.env
       .get("SBTIX_PLUGIN_JAR_PATH")
@@ -230,7 +230,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val sbtixRepository = settingKey[String]("URL of the repository to use")
     
     // Setting to customize the default.nix content
-    val sbtixNixContentTemplate = settingKey[(String, String) => String]("Function to generate Nix file content")
+    val sbtixNixContentTemplate = settingKey[(String, String, String, String) => String]("Function to generate Nix file content")
   }
 
   import autoImport._
@@ -306,9 +306,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     * consumer (scripted tests, `sbtix genComposition`, integration fixtures) sees
     * the same content without rerunning extra tooling.
     */
-  private def generatedNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String): String = {
+  private def generatedNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String, scalaBin: String, sbtBin: String): String = {
     val timestamp = System.currentTimeMillis().toString
-    renderSbtixTemplate(loadGeneratedNixTemplate(), currentPluginVersion, timestamp)
+    renderSbtixTemplate(loadGeneratedNixTemplate(), currentPluginVersion, timestamp, scalaBin, sbtBin)
       .replace("{{PLUGIN_VERSION}}", currentPluginVersion)
       .replace("{{SBT_BUILD_VERSION}}", sbtBuildVersion)
   }
@@ -595,7 +595,12 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val bootstrapTimestamp = System.currentTimeMillis().toString
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
       
-      val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
+      val rawNixContent = sbtixNixContentTemplate.value(
+        currentPluginVersion,
+        sbtVersion.value,
+        scalaBinaryVersion.value,
+        sbtBinaryVersion.value
+      )
       val hasStoreFetcher = rawNixContent.contains(StoreBootstrapMarker)
       val pluginJarEnv = sys.env.get("SBTIX_PLUGIN_JAR_PATH").filter(_.nonEmpty)
       log.info(
@@ -679,7 +684,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Render sbtix.nix template with runtime metadata (plugin version + bootstrap snippet)
       if (targetSbtixNix.exists()) {
         val raw = IO.read(targetSbtixNix)
-        val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp)
+        val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp, scalaBinaryVersion.value, sbtBinaryVersion.value)
         if (raw != rendered) {
           log.info(s"[SBTIX_DEBUG genComposition] Rendered sbtix.nix template for plugin version $currentPluginVersion")
           IO.write(targetSbtixNix, rendered)
@@ -693,7 +698,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
               log.warn(s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name")
-              val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp)
+              val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp, scalaBinaryVersion.value, sbtBinaryVersion.value)
               IO.write(targetSbtixNix, updated)
             case None =>
               log.warn("[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file")
