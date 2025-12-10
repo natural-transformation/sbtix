@@ -48,6 +48,11 @@ let
   manualRepo = import ./manual-repo.nix;
   repoLock = import ./repo.nix;
   projectRepo = import ./project/repo.nix;
+  projectMetaRepoPath = ./project/project/repo.nix;
+  projectMetaRepo =
+    if builtins.pathExists projectMetaRepoPath
+    then import projectMetaRepoPath
+    else {};
 
   pluginRepoPath = ./sbtix-plugin-repo.nix;
   pluginRepo =
@@ -56,7 +61,7 @@ let
     else null;
 
   repositories =
-    [ repoLock projectRepo manualRepo ]
+    [ repoLock projectRepo projectMetaRepo manualRepo ]
     ++ optional (pluginRepo != null) pluginRepo;
   
   buildInputsPath = ./sbtix-build-inputs.nix;
@@ -67,7 +72,7 @@ let
 in
   sbtix.buildSbtProgram {
     name = "three";
-    src = cleanSource (gitignoreLib.gitignoreSource ./.);
+    src = ./.;
     repo = repositories;
     sbtOptions = "-Dplugin.version=${pluginVersion}";
     sbtixBuildInputs = sbtixInputs;

@@ -24,9 +24,9 @@ let
   sbtixSource = sbtixSourceFetcher {
     type = "git";
     url = "https://github.com/natural-transformation/sbtix";
-    rev = "0e338ab986d2488acaa927445d807569d9d2fbe5";
-    narHash = "sha256-h26HPLXddbC7RqeQPZURkebTidVvdy0+vy/RpY3zRGE=";
-    sha256 = "0qa4yf6sbl9gpwz2sxvgsn4x7rli26akv4578sxv0xfxnly8fvl7";
+    rev = "b6fda917e6e4f304762b9f9ca1ed144d9471c15c";
+    narHash = "sha256-tG5/lZdz8l+nKk6n6Ef3iZX0VrpnJjIACHJFNrbhYzA=";
+    sha256 = "0c33w6v3cibj100349k7p9bg95c9yx3yi9sf5akmzwkkjyapyvml";
   };
 
   sbtixPluginRepos = [
@@ -41,12 +41,21 @@ let
     repo = sbtixPluginRepos;
   };
 
-  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT/jars/sbtix.jar";
+  pluginVersion =
+    let versions = builtins.attrNames (builtins.readDir "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0");
+    in builtins.head versions;
+
+  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
 
 
   manualRepo = import ./manual-repo.nix;
   repoLock = import ./repo.nix;
   projectRepo = import ./project/repo.nix;
+  projectMetaRepoPath = ./project/project/repo.nix;
+  projectMetaRepo =
+    if builtins.pathExists projectMetaRepoPath
+    then import projectMetaRepoPath
+    else {};
 
   pluginRepoPath = ./sbtix-plugin-repo.nix;
   pluginRepo =
@@ -55,7 +64,8 @@ let
     else null;
 
   repositories =
-    [ repoLock projectRepo manualRepo ]
+    [ repoLock projectRepo projectMetaRepo ]
+    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo
     ++ optional (pluginRepo != null) pluginRepo;
   
   buildInputsPath = ./sbtix-build-inputs.nix;
@@ -66,43 +76,41 @@ let
 in
   sbtix.buildSbtProgram {
     name = "one";
-    src = cleanSource (gitignoreLib.gitignoreSource ./.);
+    src = cleanSource ./.;
     repo = repositories;
-    sbtOptions = "-Dplugin.version=0.1.0-SNAPSHOT";
+    sbtOptions = "-Dplugin.version=${pluginVersion}";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
 
-              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.1.0-SNAPSHOT"
+              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.4-SNAPSHOT"
               mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
               if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
                 cp "$pluginJar" $ivyDir/jars/sbtix.jar
-              elif [ -f ./sbtix-plugin-under-test.jar ]; then
-                cp ./sbtix-plugin-under-test.jar $ivyDir/jars/sbtix.jar
               else
-                echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
+                echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
                 exit 1
               fi
-              cat <<POM_EOF > $ivyDir/poms/sbtix-0.1.0-SNAPSHOT.pom
+                cat <<POM_EOF > $ivyDir/poms/sbtix-0.4-SNAPSHOT.pom
                   <project xmlns="http://maven.apache.org/POM/4.0.0"
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
                     <groupId>se.nullable.sbtix</groupId>
                     <artifactId>sbtix</artifactId>
-                    <version>0.1.0-SNAPSHOT</version>
+                    <version>0.4-SNAPSHOT</version>
                     <name>sbtix Plugin</name>
                     <description>Locally provided sbtix plugin for Nix build</description>
                     <packaging>jar</packaging>
                   </project>
               POM_EOF
-              cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
+                cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
                   <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
                     <info organisation="se.nullable.sbtix"
                           module="sbtix"
-                          revision="0.1.0-SNAPSHOT"
+                          revision="0.4-SNAPSHOT"
                           status="release"
-                          publication="1765108857930"
+                          publication="1765361415824"
                           e:sbtVersion="1.0"
                           e:scalaVersion="2.12">
                       <description>
@@ -124,6 +132,6 @@ in
                     <dependencies></dependencies>
                   </ivy-module>
               IVY_EOF
-              ln -sf ivy.xml $ivyDir/ivys/ivy-0.1.0-SNAPSHOT.xml
+              ln -sf ivy.xml $ivyDir/ivys/ivy-0.4-SNAPSHOT.xml
     '';
   }

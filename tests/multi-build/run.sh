@@ -33,16 +33,16 @@ done
 
 pushd one
 sbt --error publishLocal
-sbtix-gen-all
+sbtix-gen-all2
 popd
 
 pushd two
 sbt --error publishLocal
-sbtix-gen-all
+sbtix-gen-all2
 popd
 
 pushd three
-sbtix-gen-all
+sbtix-gen-all2
 nix-build
 ./result/bin/mb-three
 popd

@@ -10,6 +10,18 @@
   };
 
   "artifacts" = {
+    "nix-public/org/junit/junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom" = {
+      url = "https://repo1.maven.org/maven2/org/junit/junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom";
+      sha256 = "1j3ww7j77nnzakw3j6apk0bic1wld9q256b1bp5w5znw9r5gqgsa";
+    };
+    "nix-public/org/apache/commons/commons-lang3/3.16.0/commons-lang3-3.16.0.jar" = {
+      url = "https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.16.0/commons-lang3-3.16.0.jar";
+      sha256 = "1y00gbz0cd1p146b5mc3lm5nl18h89a2cz81wif70av09pbrsw08";
+    };
+    "nix-public/org/apache/commons/commons-lang3/3.16.0/commons-lang3-3.16.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/apache/commons/commons-lang3/3.16.0/commons-lang3-3.16.0.pom";
+      sha256 = "0b7absqwgdpp2l13zm5p94vf8pphflxpnc1sxcfjrry2aqwki072";
+    };
     "nix-public/com/eed3si9n/gigahorse-core_2.12/0.4.0/gigahorse-core_2.12-0.4.0-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/com/eed3si9n/gigahorse-core_2.12/0.4.0/gigahorse-core_2.12-0.4.0-javadoc.jar";
       sha256 = "D2E14093A14F1A80CC296D0026D96591D5D446310F8F3BE5EA2D2869249716CD";
@@ -73,6 +85,39 @@
     "nix-public/com/github/sbt/pgp-library_2.12/2.3.1/pgp-library_2.12-2.3.1.pom" = {
       url = "https://repo1.maven.org/maven2/com/github/sbt/pgp-library_2.12/2.3.1/pgp-library_2.12-2.3.1.pom";
       sha256 = "F274534FC2B5AEFF6E8ADCD536019D0DF5FF958F634525F1B07A82F109DE7947";
+    };
+    # sbt-native-packager plugin artifacts (both suffixed and unsuffixed filenames)
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.jar";
+      sha256 = "D8D418EC61A77E70A8339469343A34BDEBD74FAE12764FF06DB0E680EC549D8E";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager-1.11.0.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.jar";
+      sha256 = "D8D418EC61A77E70A8339469343A34BDEBD74FAE12764FF06DB0E680EC549D8E";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.pom" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.pom";
+      sha256 = "4A1CF1278FB47C173A087F3CD939C9131E172543972832169DB36F60A80CBD0A";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager-1.11.0.pom" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0.pom";
+      sha256 = "4A1CF1278FB47C173A087F3CD939C9131E172543972832169DB36F60A80CBD0A";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-sources.jar";
+      sha256 = "AF8DBF59A1421DCAC1F817EF38674FB9F8CE56061E6B413D7FA48E7BC78909D3";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager-1.11.0-sources.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-sources.jar";
+      sha256 = "AF8DBF59A1421DCAC1F817EF38674FB9F8CE56061E6B413D7FA48E7BC78909D3";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-javadoc.jar";
+      sha256 = "3C89B5F6C1043FD0C71362C9D87CE6C055A5287191671585D9B938722FAC09B6";
+    };
+    "nix-public/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager-1.11.0-javadoc.jar" = {
+      url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-native-packager_2.12_1.0/1.11.0/sbt-native-packager_2.12_1.0-1.11.0-javadoc.jar";
+      sha256 = "3C89B5F6C1043FD0C71362C9D87CE6C055A5287191671585D9B938722FAC09B6";
     };
     "nix-public/com/github/sbt/sbt-pgp_2.12_1.0/2.3.1/sbt-pgp_2.12_1.0-2.3.1-javadoc.jar" = {
       url = "https://repo1.maven.org/maven2/com/github/sbt/sbt-pgp_2.12_1.0/2.3.1/sbt-pgp_2.12_1.0-2.3.1-javadoc.jar";

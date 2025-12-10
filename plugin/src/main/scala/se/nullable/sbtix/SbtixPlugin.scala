@@ -40,8 +40,8 @@ object SbtixPlugin extends AutoPlugin {
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val SampleDefaultTemplateResource = "/sbtix/default.nix.template"
   private val GeneratedNixTemplateResource = "/sbtix/generated.nix.template"
-  private val GeneratedNixFileName = "sbtix-generated.nix"
   private val StoreBootstrapMarker = "sbtixSourceFetcher = {"
+  private val GeneratedNixFileName = "sbtix-generated.nix"
   
   private def indentMultiline(text: String, indent: String): String =
     text.linesIterator.map(line => indent + line).mkString("\n")
@@ -171,16 +171,14 @@ object SbtixPlugin extends AutoPlugin {
 mkdir -p "$$ivyDir/jars" "$$ivyDir/ivys" "$$ivyDir/poms"
 if [ -n "$${pluginJar:-}" ] && [ -f "$$pluginJar" ]; then
   cp "$$pluginJar" $$ivyDir/jars/sbtix.jar
-elif [ -f ./sbtix-plugin-under-test.jar ]; then
-  cp ./sbtix-plugin-under-test.jar $$ivyDir/jars/sbtix.jar
 else
-  echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
+  echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
   exit 1
 fi
-cat <<POM_EOF > $$ivyDir/poms/sbtix-$version.pom
+  cat <<POM_EOF > $$ivyDir/poms/sbtix-$version.pom
 $pom
 POM_EOF
-cat <<IVY_EOF > $$ivyDir/ivys/ivy.xml
+  cat <<IVY_EOF > $$ivyDir/ivys/ivy.xml
 $ivy
 IVY_EOF
 ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
@@ -371,7 +369,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       .getOrElse {
         log.info(s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}")
         Set.empty
-      }
+    }
   }
   
   override lazy val projectSettings = Seq(
@@ -541,7 +539,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
               IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
             case _ =>
               log.info(s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo")
-              IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
+          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
           }
       }
       
@@ -596,7 +594,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val currentPluginVersion = thisPluginVersion
       val bootstrapTimestamp = System.currentTimeMillis().toString
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
-
+      
       val rawNixContent = sbtixNixContentTemplate.value(currentPluginVersion, sbtVersion.value)
       val hasStoreFetcher = rawNixContent.contains(StoreBootstrapMarker)
       val pluginJarEnv = sys.env.get("SBTIX_PLUGIN_JAR_PATH").filter(_.nonEmpty)
@@ -610,107 +608,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       if (usesStoreBootstrap)
         log.info("[SBTIX_DEBUG genComposition] Store-backed plugin bootstrap detected; no workspace jar required.")
       else
-        log.info("[SBTIX_DEBUG genComposition] Falling back to workspace sbtix-plugin-under-test.jar bootstrap.")
+        sys.error("sbtix: store-backed plugin bootstrap missing; set SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH")
 
-      // Find the sbtix-plugin-under-test.jar file - check multiple locations
-      val scriptedBaseDirSysProp = "sbt.scripted.basedir"
-      val sourceJarInScriptedRoot = sys.props.get(scriptedBaseDirSysProp) match {
-        case Some(path) => 
-          val scriptedRootDir = new File(path)
-          val jarFile = new File(scriptedRootDir, "sbtix-plugin-under-test.jar")
-          log.info(s"[SBTIX_DEBUG genComposition] Checking JAR in scripted root dir: ${jarFile.getAbsolutePath}")
-          if (jarFile.exists()) {
-            log.info(s"[SBTIX_DEBUG genComposition] Found JAR in scripted root dir: ${jarFile.getAbsolutePath}")
-            jarFile
-          } else {
-            log.warn(s"[SBTIX_DEBUG genComposition] JAR not found in scripted root dir: ${jarFile.getAbsolutePath}")
-            // Continue to fallbacks
-            null
-          }
-          
-        case None => 
-          log.warn(s"[SBTIX_DEBUG genComposition] System property '${scriptedBaseDirSysProp}' is not defined!")
-          // Continue to fallbacks
-          null
-      }
-      
-      // Fallback 1: Check if there's a JAR in the current project directory
-      val jarInCurrentDir = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
-      
-      // Fallback 2: Check if there's a JAR in the parent directory (test script root)
-      val jarInParentDir = new File(currentProjectBaseDir.getParentFile, "sbtix-plugin-under-test.jar")
-      
-      // Fallback 3: Use the packaged JAR from the plugin build
-      val pluginBuildDir = new File(sys.props.getOrElse("user.dir", "."), "target/scala-2.12/sbt-1.0")
-      val jarInPluginBuild = new File(pluginBuildDir, "sbtix-0.4-SNAPSHOT.jar")
-      
-      // Try all possible sources in order
-      val codeSource = Option(getClass.getProtectionDomain.getCodeSource)
-      log.info(s"[SBTIX_DEBUG genComposition] Plugin code source: ${codeSource.map(_.getLocation).getOrElse("unknown")}")
-      val jarFromClasspath = codeSource
-        .map(_.getLocation.toURI)
-        .map(new File(_))
-      jarFromClasspath.filter(_.exists()).foreach { jar =>
-        log.info(s"[SBTIX_DEBUG genComposition] Using plugin JAR from classpath: ${jar.getAbsolutePath}")
-      }
-
-      val sourceJar =
-        jarFromClasspath.filter(_.exists())
-          .orElse(Option(sourceJarInScriptedRoot).filter(_.exists()))
-          .orElse {
-            if (jarInCurrentDir.exists()) {
-              log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in current dir: ${jarInCurrentDir.getAbsolutePath}")
-              Some(jarInCurrentDir)
-            } else None
-          }
-          .orElse {
-            if (jarInParentDir.exists()) {
-              log.info(s"[SBTIX_DEBUG genComposition] Using JAR found in parent dir: ${jarInParentDir.getAbsolutePath}")
-              Some(jarInParentDir)
-            } else None
-          }
-          .orElse {
-            if (jarInPluginBuild.exists()) {
-              log.info(s"[SBTIX_DEBUG genComposition] Using JAR from plugin build: ${jarInPluginBuild.getAbsolutePath}")
-              Some(jarInPluginBuild)
-            } else None
-          }
-          .getOrElse {
-            log.warn(s"[SBTIX_DEBUG genComposition] No JAR found - creating a dummy JAR")
-            val dummyJar = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
-            IO.touch(dummyJar)
-            dummyJar
-          }
-      
-      // Define the target location for the JAR within the Nix build's source directory
-      val targetJarInNixSrc = new File(currentProjectBaseDir, "sbtix-plugin-under-test.jar")
-      log.info(s"[SBTIX_DEBUG genComposition] Target JAR (for Nix 'src'): ${targetJarInNixSrc.getAbsolutePath}")
-
-      if (usesStoreBootstrap) {
-        if (targetJarInNixSrc.exists()) {
-          log.info("[SBTIX_DEBUG genComposition] Store-backed bootstrap active; removing legacy sbtix-plugin-under-test.jar")
-          IO.delete(targetJarInNixSrc)
-        } else {
-          log.info("[SBTIX_DEBUG genComposition] Store-backed bootstrap active; no workspace JAR needed")
-        }
-      } else {
-        // Copy the JAR if needed
-        if (sourceJar.getCanonicalPath != targetJarInNixSrc.getCanonicalPath) {
-          log.info(s"[SBTIX_DEBUG genComposition] Copying JAR from ${sourceJar.getAbsolutePath} to ${targetJarInNixSrc.getAbsolutePath}")
-          try {
-            copyFile(sourceJar, targetJarInNixSrc)
-            log.info(s"[SBTIX_DEBUG genComposition] JAR copy successful.")
-          } catch {
-            case e: Exception => 
-              log.error(s"[SBTIX_DEBUG genComposition] FAILED to copy JAR: ${e.getMessage}")
-              // Continue anyway to generate the composition file
-          }
-        } else {
-          log.info(s"[SBTIX_DEBUG genComposition] Source JAR is already in the target location")
-        }
-      }
-      
-      // Check if there's an expected default.nix file we should use
+      // Write generated nix
       val generatedNixFile = new File(genNixProjectDir.value, GeneratedNixFileName)
       IO.write(generatedNixFile, templatedNixContent)
       log.info(s"[SBTIX_DEBUG genComposition] Wrote sbtix-generated file to ${generatedNixFile.getAbsolutePath}")
@@ -718,7 +618,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val expectedDir = new File(currentProjectBaseDir, "expected")
       val expectedDefaultNix = new File(expectedDir, "default.nix")
       val defaultNixFile = new File(genNixProjectDir.value, "default.nix")
-
+      
       if (expectedDefaultNix.exists()) {
         log.info(s"[SBTIX_DEBUG genComposition] Using expected default.nix from ${expectedDefaultNix.getAbsolutePath}")
         IO.copyFile(expectedDefaultNix, defaultNixFile)

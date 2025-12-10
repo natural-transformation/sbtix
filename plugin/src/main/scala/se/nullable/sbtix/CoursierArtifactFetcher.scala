@@ -34,6 +34,38 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
     artifactUrl.compareTo(other.artifactUrl)
 }
 
+  /** Minimal POM model to capture parents and import-scoped BOMs. */
+  private object PomModel {
+    final case class PomDep(groupId: String, artifactId: String, version: String, scope: String = "", `type`: String = "pom")
+    final case class Model(parents: List[PomDep], importBoms: Set[PomDep], optionalDeps: Set[PomDep])
+
+    def parse(file: File): Model = {
+      val xml = scala.xml.XML.loadFile(file)
+      val parent = (xml \ "parent").headOption.map { p =>
+        PomDep(
+          (p \ "groupId").text.trim,
+          (p \ "artifactId").text.trim,
+          (p \ "version").text.trim
+        )
+      }.toList
+      val deps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map { d =>
+        PomDep(
+          (d \ "groupId").text.trim,
+          (d \ "artifactId").text.trim,
+          (d \ "version").text.trim,
+          scope = (d \ "scope").text.trim,
+          `type` = (d \ "type").text.trim match {
+            case "" => "pom"
+            case other => other
+          }
+        )
+      }.toSet
+      val importBoms = deps.filter(d => d.scope == "import" && d.`type` == "pom")
+      val optionalDeps = deps.filter(d => d.scope == "optional" || (d.scope.isEmpty && d.`type` == "pom"))
+      Model(parent, importBoms, optionalDeps)
+    }
+  }
+
 case class ProvidedArtifact(
   organization: String,
   name: String,
@@ -107,13 +139,8 @@ class CoursierArtifactFetcher(
             logger.info(s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}")
             (lockedAcc, providedAcc + ProvidedArtifact.from(dependency, artifact.url))
           } else {
-            val maybeArtifact = downloadArtifact(artifact).map { file =>
-              val descriptor = descriptorForUrl(artifact.url, repoDescriptors)
-              val relative = computeRelativePath(artifact.url, descriptor)
-              val sha256 = computeSha256(file)
-              NixArtifact(descriptor.name, relative, artifact.url, sha256)
-            }
-            (maybeArtifact.map(lockedAcc + _).getOrElse(lockedAcc), providedAcc)
+            val expanded = fetchAndExpand(artifact, repoDescriptors, dependency)
+            (lockedAcc ++ expanded, providedAcc)
           }
       }
 
@@ -122,10 +149,10 @@ class CoursierArtifactFetcher(
     val metaArtifacts = metaArtifactCollector.asScala.toSet
       .filterNot(meta => resolvedUrls.contains(meta.artifactUrl))
       .filterNot(meta => isLocalIvyUrl(meta.artifactUrl))
-      .map { meta =>
+      .flatMap { meta =>
         val descriptor = descriptorForUrl(meta.artifactUrl, repoDescriptors)
         val relative = computeRelativePath(meta.artifactUrl, descriptor)
-        NixArtifact(descriptor.name, relative, meta.artifactUrl, meta.checkSum)
+        expandCrossSuffixed(NixArtifact(descriptor.name, relative, meta.artifactUrl, meta.checkSum))
       }
 
     val sanitizedArtifacts = lockedArtifacts ++ metaArtifacts
@@ -522,6 +549,85 @@ class CoursierArtifactFetcher(
       if (normalizedUrl.startsWith(prefix)) normalizedUrl.substring(prefix.length)
       else normalizedUrl
     rawRelative.stripPrefix("/")
+  }
+
+  /** Some Maven-hosted sbt plugins live under a cross-versioned directory name but
+    * publish files named without the cross suffix (e.g. artifactId `_2.12_1.0`, file `foo-1.0.pom`).
+    * Keep both shapes to satisfy the sbt launcher in offline mode.
+    */
+  private def expandCrossSuffixed(artifact: NixArtifact): Set[NixArtifact] = {
+    val rel = artifact.relativePath
+    val idx = rel.lastIndexOf('/')
+    if (idx < 0) Set(artifact)
+    else {
+      val (dir, file) = rel.splitAt(idx + 1)
+      val CrossFile = "(.+?)_\\d+\\.\\d+(?:_\\d+\\.\\d+)?-(.+)".r
+      file match {
+        case CrossFile(baseWithSuffix, rest) =>
+          val baseNoSuffix = baseWithSuffix.replaceAll("_[0-9]+\\.[0-9]+(_[0-9]+\\.[0-9]+)?$", "")
+          val altFile = dir + s"$baseNoSuffix-$rest"
+
+          // Also emit a variant where the directory segment drops the cross suffix, matching
+          // how sbt resolves some plugin artifacts in Maven layout.
+          val dirAlt =
+            if (dir.endsWith(s"$baseWithSuffix/"))
+              dir.dropRight(baseWithSuffix.length + 1) + baseNoSuffix + "/"
+            else dir
+          val altDirFile = dirAlt + s"$baseNoSuffix-$rest"
+
+          Set(
+            artifact,
+            artifact.copy(relativePath = altFile),
+            artifact.copy(relativePath = altDirFile)
+          )
+        case _ =>
+          // If only the directory carries the cross suffix (common for Maven layout of sbt plugins),
+          // emit a variant with the directory suffix stripped.
+          val DirWithSuffix = "(.*\\/)?(.+?)_\\d+\\.\\d+(?:_\\d+\\.\\d+)?\\/$".r
+          dir match {
+            case DirWithSuffix(prefix, baseWithSuffix) =>
+              val baseNoSuffix = baseWithSuffix.replaceAll("_[0-9]+\\.[0-9]+(_[0-9]+\\.[0-9]+)?$", "")
+              val altDir = Option(prefix).getOrElse("") + baseNoSuffix + "/"
+              Set(artifact, artifact.copy(relativePath = altDir + file))
+            case _ => Set(artifact)
+          }
+      }
+    }
+  }
+
+  /** Download an artifact, emit its NixArtifact(s), and for POMs also emit parent and import-scope BOMs. */
+  private def fetchAndExpand(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor], dep: CDependency): Set[NixArtifact] = {
+    val base = downloadArtifact(artifact).map { file =>
+      val descriptor = descriptorForUrl(artifact.url, repoDescriptors)
+      val relative = computeRelativePath(artifact.url, descriptor)
+      val sha256 = computeSha256(file)
+      expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifact.url, sha256))
+    }.getOrElse(Set.empty)
+
+    val pomExtras =
+      if (artifact.url.endsWith(".pom"))
+        collectPomAncestors(artifact, repoDescriptors)
+      else Set.empty[NixArtifact]
+
+    base ++ pomExtras
+  }
+
+  /** Parse a POM and lock any parent POM and imported BOMs (scope=import, type=pom). */
+  private def collectPomAncestors(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor]): Set[NixArtifact] = {
+    downloadArtifact(artifact).map { file =>
+      val pom = PomModel.parse(file)
+      val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
+      candidates.flatMap { pomDep =>
+        val path = s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.${if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"}"
+        val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
+        val url = descriptor.normalizedRoot + path
+        downloadArtifact(CArtifact(url)).toSeq.flatMap { f =>
+          val relative = computeRelativePath(url, descriptor)
+          val sha256 = computeSha256(f)
+          expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
+        }
+      }.toSet
+    }.getOrElse(Set.empty)
   }
 
   private val ivyVariablePattern = "\\$\\{([^}]+)\\}".r

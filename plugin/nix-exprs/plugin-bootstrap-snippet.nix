@@ -59,8 +59,6 @@ ivyDir="./.ivy2-home/local/${metadata.organization}/${metadata.artifact}/scala_$
 mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
 if [ -n "${pluginJar:-}" ] && [ -f "${pluginJar}" ]; then
   cp "${pluginJar}" "$ivyDir/jars/${metadata.artifact}.jar"
-elif [ -f ./sbtix-plugin-under-test.jar ]; then
-  cp ./sbtix-plugin-under-test.jar "$ivyDir/jars/${metadata.artifact}.jar"
 else
   echo "sbtix: unable to locate plugin jar. Provide sbtixTool with source metadata or rerun sbtix genComposition." 1>&2
   exit 1
