@@ -214,9 +214,9 @@ class CoursierArtifactFetcher(
         // match what Artifactory serves.
         modId.name
     } else {
-      CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
-        .map(applyFn => applyFn(modId.name))
-        .getOrElse(modId.name)
+        CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
+          .map(applyFn => applyFn(modId.name))
+          .getOrElse(modId.name)
     }
   }
 
