@@ -48,6 +48,11 @@ popd
 
 pushd three
 sbtix-gen-all2
+# Regression guard for sbt core modules: sbt-native-packager pulls
+# org.scala-sbt:io_2.12:1.10.4; if it is missing from the generated
+# repos, sbt will try to go online during the Nix build.
+grep -q 'org/scala-sbt/io_2.12/1.10.4/io_2.12-1.10.4.pom' repo.nix
+grep -q 'org/scala-sbt/io_2.12/1.10.4/io_2.12-1.10.4.pom' project/project/repo.nix
 nix-build
 ./result/bin/mb-three
 grep -q 'junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom' project/project/repo.nix
