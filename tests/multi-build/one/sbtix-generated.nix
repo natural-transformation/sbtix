@@ -14,20 +14,7 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
-  sbtixSourceFetcher = { url, rev, narHash, sha256, ... }@args:
-    if builtins ? fetchTree
-    then builtins.fetchTree (builtins.removeAttrs args [ "sha256" ])
-    else pkgs.fetchgit {
-      inherit url rev sha256;
-    };
-
-  sbtixSource = sbtixSourceFetcher {
-    type = "git";
-    url = "https://github.com/natural-transformation/sbtix";
-    rev = "878b3eaa01b5708df1f2176257ef91659d89f8db";
-    narHash = "sha256-vTBiF/3bK2g3dgs0pHX9HJFKx9UJFFtVPd0D3zYECPM=";
-    sha256 = "1wq80hvdy0yx7mamn509sp3lm48wzmss8d0bfqvnhayvzlbn4c5x";
-  };
+  sbtixSource = /nix/store/rkvjazq1c5ld5ycv1fayiixv50fsc36s-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))
@@ -83,7 +70,7 @@ in
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
 
-              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/0.4-SNAPSHOT"
+              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
               mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
               if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
                 cp "$pluginJar" $ivyDir/jars/sbtix.jar
@@ -91,14 +78,14 @@ in
                 echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
                 exit 1
               fi
-                cat <<POM_EOF > $ivyDir/poms/sbtix-0.4-SNAPSHOT.pom
+                cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
                   <project xmlns="http://maven.apache.org/POM/4.0.0"
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
                     <modelVersion>4.0.0</modelVersion>
                     <groupId>se.nullable.sbtix</groupId>
                     <artifactId>sbtix</artifactId>
-                    <version>0.4-SNAPSHOT</version>
+                    <version>${pluginVersion}</version>
                     <name>sbtix Plugin</name>
                     <description>Locally provided sbtix plugin for Nix build</description>
                     <packaging>jar</packaging>
@@ -108,9 +95,9 @@ in
                   <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
                     <info organisation="se.nullable.sbtix"
                           module="sbtix"
-                          revision="0.4-SNAPSHOT"
+                          revision="${pluginVersion}"
                           status="release"
-                          publication="1765410622018"
+                          publication="1765533282269"
                           e:sbtVersion="1.0"
                           e:scalaVersion="2.12">
                       <description>
@@ -132,6 +119,6 @@ in
                     <dependencies></dependencies>
                   </ivy-module>
               IVY_EOF
-              ln -sf ivy.xml $ivyDir/ivys/ivy-0.4-SNAPSHOT.xml
+              ln -sf ivy.xml $ivyDir/ivys/ivy-${pluginVersion}.xml
     '';
   }

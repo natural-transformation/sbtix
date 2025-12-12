@@ -13,22 +13,8 @@
 let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
-  pluginVersion = "0.4-SNAPSHOT";
 
-  sbtixSourceFetcher = { url, rev, narHash, sha256, ... }@args:
-    if builtins ? fetchTree
-    then builtins.fetchTree (builtins.removeAttrs args [ "sha256" ])
-    else pkgs.fetchgit {
-      inherit url rev sha256;
-    };
-
-  sbtixSource = sbtixSourceFetcher {
-    type = "git";
-    url = "https://github.com/natural-transformation/sbtix";
-    rev = "76d9d74c43f52a7a616b0c94010517feaaa2663b";
-    narHash = "sha256-Is60tmh4697ogc2HTagMOxHxg4JqPBdk3FaFzCw20TU=";
-    sha256 = "0dfi6qncr1anvij1fg3aha1z249v1jl4v1ydh7ldxsvqd2vb9ki2";
-  };
+  sbtixSource = /nix/store/rkvjazq1c5ld5ycv1fayiixv50fsc36s-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))
@@ -41,6 +27,10 @@ let
     src = cleanSource (sbtixSource + "/plugin");
     repo = sbtixPluginRepos;
   };
+
+  pluginVersion =
+    let versions = builtins.attrNames (builtins.readDir "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0");
+    in builtins.head versions;
 
   sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
 
@@ -61,7 +51,8 @@ let
     else null;
 
   repositories =
-    [ repoLock projectRepo projectMetaRepo manualRepo ]
+    [ repoLock projectRepo projectMetaRepo ]
+    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo
     ++ optional (pluginRepo != null) pluginRepo;
   
   buildInputsPath = ./sbtix-build-inputs.nix;
@@ -72,25 +63,22 @@ let
 in
   sbtix.buildSbtProgram {
     name = "three";
-    src = ./.;
+    src = cleanSource ./.;
     repo = repositories;
     sbtOptions = "-Dplugin.version=${pluginVersion}";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
-      pluginVersion="${pluginVersion}"
 
               ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
               mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
               if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
                 cp "$pluginJar" $ivyDir/jars/sbtix.jar
-              elif [ -f ./sbtix-plugin-under-test.jar ]; then
-                cp ./sbtix-plugin-under-test.jar $ivyDir/jars/sbtix.jar
               else
-                echo "sbtix: unable to locate plugin jar; rerun sbtix genComposition or upgrade sbtix." 1>&2
+                echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
                 exit 1
               fi
-              cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
+                cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
                   <project xmlns="http://maven.apache.org/POM/4.0.0"
                            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                            xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -103,13 +91,13 @@ in
                     <packaging>jar</packaging>
                   </project>
               POM_EOF
-              cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
+                cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
                   <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
                     <info organisation="se.nullable.sbtix"
                           module="sbtix"
                           revision="${pluginVersion}"
                           status="release"
-                          publication="1765056976221"
+                          publication="1765533623359"
                           e:sbtVersion="1.0"
                           e:scalaVersion="2.12">
                       <description>

@@ -1,6 +1,8 @@
 #!@shell@
 set -euo pipefail
 
+SBT_OPTS=${SBT_OPTS:-}
+
 IVY_LOCAL="${HOME}/.ivy2/local/se.nullable.sbtix"
 if [ -d "${IVY_LOCAL}" ]; then
   echo "Deleting any cached sbtix plugins in '~/.ivy'. So the most recent version from nix is used."
@@ -16,6 +18,23 @@ mkdir -p "${PLUGIN_DIR}"
 # Expose the in-store plugin JAR to any sbt process launched through this
 # wrapper so generated nix expressions can reference it directly.
 export SBTIX_PLUGIN_JAR_PATH="@pluginJar@"
+export SBT_OPTS="$SBT_OPTS -Dsbtix.pluginJarPath=${SBTIX_PLUGIN_JAR_PATH}"
+
+# Prefer the in-store checkout of the sbtix sources that produced this wrapper.
+# This keeps generated Nix files fully offline (no GitHub fetch) in CI and in
+# local dev shells, even when the working tree is dirty.
+if [ -n "@sourcePath@" ]; then
+  export SBTIX_SOURCE_PATH="@sourcePath@"
+fi
+
+if [ -n "${SBTIX_SOURCE_PATH:-}" ]; then
+  export SBT_OPTS="$SBT_OPTS -Dsbtix.sourcePath=$SBTIX_SOURCE_PATH"
+fi
+
+# Use an isolated Coursier cache under the sbtix global base so we don't
+# accidentally reuse stale sbt plugin artifacts across wrapper rebuilds.
+export SBT_OPTS="$SBT_OPTS -Dcoursier.cache=${GLOBAL_DIR}/.coursier-cache"
+export COURSIER_CACHE="${GLOBAL_DIR}/.coursier-cache/v1"
 
 # Also purge cached copies of the sbtix plugin to make sure we always load the
 # freshly built jar from the nix store. Otherwise Ivy may silently reuse an old

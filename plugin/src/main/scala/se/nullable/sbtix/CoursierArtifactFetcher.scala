@@ -107,10 +107,13 @@ class CoursierArtifactFetcher(
 
   private val effectiveResolvers: Set[Resolver] =
     if (resolvers.exists(_.name == ivyLocalResolver.name)) resolvers else resolvers + ivyLocalResolver
+  private val sbtVersionKeys = Set("sbtVersion", "e:sbtVersion")
+  private val sbtBinaryVersionAttr: Option[String] =
+    extraIvyProps.get("sbtBinaryVersion").orElse(extraIvyProps.get("sbtVersion"))
 
   def apply(depends: Set[SbtixDependency]): (Set[NixRepo], Set[NixArtifact], Set[ProvidedArtifact], Set[ResolutionErrors]) = {
     logger.info(s"[SBTIX_DEBUG] Effective resolvers: ${effectiveResolvers.map(_.name).mkString(", ")}; ivyLocal=${ivyLocalCanonical.getPath}")
-    val coursierDeps = depends.map(toCoursierDependency)
+    val coursierDeps = depends.flatMap(expandSbtPluginDependency).map(toCoursierDependency)
     val (resolvedArtifacts, errors) = getAllDependencies(coursierDeps)
     logger.info(s"[SBTIX_DEBUG] Total resolved artifacts: ${resolvedArtifacts.size}")
     resolvedArtifacts.foreach { case (_, artifact) =>
@@ -217,6 +220,24 @@ class CoursierArtifactFetcher(
         CrossVersion(modId.crossVersion, scalaVersion, scalaBinaryVersion)
           .map(applyFn => applyFn(modId.name))
           .getOrElse(modId.name)
+    }
+  }
+
+  /** sbt plugins are published in both Ivy (unsuffixed module name with
+    * scala/sbt directories) and Maven (cross-suffixed module name) layouts. Emit
+    * both shapes so resolution can succeed regardless of repository layout.
+    */
+  private def expandSbtPluginDependency(dep: SbtixDependency): Set[SbtixDependency] = {
+    val mod = dep.moduleId
+    val isSbtPlugin = mod.extraAttributes.keySet.exists(sbtVersionKeys.contains)
+    if (!isSbtPlugin) Set(dep)
+    else {
+      val crossVariant =
+        sbtBinaryVersionAttr.flatMap { sbtBin =>
+          val crossName = s"${mod.name}_${scalaBinaryVersion}_${sbtBin}"
+          if (crossName == mod.name) None else Some(dep.copy(moduleId = mod.withName(crossName)))
+        }
+      Set(dep) ++ crossVariant.toSet
     }
   }
 

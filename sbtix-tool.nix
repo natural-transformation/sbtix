@@ -2,9 +2,16 @@
 , jdk, jre, sbt, selfSourceInfo ? {}
 }:
 let
-  version = "0.4";
+  version = "0.4.1";
   versionSnapshotSuffix = "-SNAPSHOT";
   pluginVersion = "${version}${versionSnapshotSuffix}";
+
+  # Prefer flake-provided source info; fall back to environment overrides so
+  # dev shells and tests pin the exact working tree used to build this wrapper.
+  sourceUrl = "https://github.com/natural-transformation/sbtix";
+  sourceRev = selfSourceInfo.rev or (builtins.getEnv "SBTIX_SOURCE_REV");
+  sourceNarHash = selfSourceInfo.narHash or (builtins.getEnv "SBTIX_SOURCE_NAR_HASH");
+  sourcePath = selfSourceInfo.outPath or (builtins.getEnv "SBTIX_SOURCE_PATH");
 
   pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
     version = pluginVersion;
@@ -24,10 +31,6 @@ let
       (import ./plugin/sbtix-plugin-repo.nix)
     ];
   };
-
-  sourceUrl = "https://github.com/natural-transformation/sbtix";
-  sourceRev = selfSourceInfo.rev or "";
-  sourceNarHash = selfSourceInfo.narHash or "";
 
   sbtixPluginRepo = sbtix.buildSbtProject {
         name = "sbtix-plugin";
@@ -62,6 +65,7 @@ let
       --replace @sourceRev@ "${sourceRev}" \
       --replace @sourceNarHash@ "${sourceNarHash}" \
       --replace @sourceUrl@ "${sourceUrl}" \
+      --replace @sourcePath@ "${sourcePath}" \
       ;
     chmod a+x $out/bin/sbtix
   '';
