@@ -18,7 +18,7 @@ ensure_local_sbtix_source() {
   local repo_root
   # `run.sh` lives under `tests/multi-build/`, so the sbtix checkout root is two
   # levels up.
-  repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+  repo_root="$(cd ../.. && pwd)"
 
   # Read the current git revision without invoking `git`. This keeps the test
   # runner hermetic and avoids relying on a particular git version/config.

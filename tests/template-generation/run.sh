@@ -17,7 +17,7 @@ ensure_local_sbtix_source() {
   fi
 
   local repo_root
-  repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+  repo_root="$(cd ../.. && pwd)"
 
   # Read the current git revision without invoking `git`. This keeps the test
   # runner hermetic and avoids relying on a particular git version/config.

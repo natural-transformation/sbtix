@@ -97,7 +97,7 @@ in
                           module="sbtix"
                           revision="${pluginVersion}"
                           status="release"
-                          publication="1765534141736"
+                          publication="1765578257549"
                           e:sbtVersion="1.0"
                           e:scalaVersion="2.12">
                       <description>
