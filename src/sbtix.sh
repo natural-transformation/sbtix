@@ -15,6 +15,27 @@ PLUGIN_DIR="${GLOBAL_DIR}/plugins"
 # the sbtix plugin wrapper and avoid hitting system locations like /var/empty.
 mkdir -p "${PLUGIN_DIR}"
 
+# Invalidate the compiled global-plugins build when switching sbtix wrappers.
+#
+# Why: sbt caches the compiled "global plugins" build under:
+#   ${PLUGIN_DIR}/project/** and ${PLUGIN_DIR}/target/**
+# When sbtix is upgraded/downgraded, the global plugin definition we symlink
+# (`sbtix_plugin.sbt`) changes, but sbt may still reuse the old compiled build
+# and keep trying to resolve the old sbtix plugin version (e.g. 0.4-SNAPSHOT).
+# This is especially likely with Nix store files, which often have an epoch
+# mtime that can confuse file-change detection.
+PLUGIN_STAMP_FILE="${GLOBAL_DIR}/.sbtix-plugin-stamp"
+CURRENT_PLUGIN_STAMP="@plugin@|@pluginJar@"
+OLD_PLUGIN_STAMP=""
+if [ -f "${PLUGIN_STAMP_FILE}" ]; then
+  OLD_PLUGIN_STAMP="$(cat "${PLUGIN_STAMP_FILE}" 2>/dev/null || true)"
+fi
+if [ "${OLD_PLUGIN_STAMP}" != "${CURRENT_PLUGIN_STAMP}" ]; then
+  echo "sbtix: detected a different wrapper/plugin; clearing global plugin build caches"
+  rm -rf "${PLUGIN_DIR}/project" "${PLUGIN_DIR}/target"
+  printf '%s' "${CURRENT_PLUGIN_STAMP}" > "${PLUGIN_STAMP_FILE}"
+fi
+
 # Expose the in-store plugin JAR to any sbt process launched through this
 # wrapper so generated nix expressions can reference it directly.
 export SBTIX_PLUGIN_JAR_PATH="@pluginJar@"
