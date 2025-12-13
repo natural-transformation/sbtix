@@ -102,7 +102,17 @@ for f in {one,two,three}/{,project/}*repo.nix; do
     fi
 done
 
-SBTIX_GEN_ALL2=${SBTIX_GEN_ALL2:-../../../result/bin/sbtix-gen-all2}
+repo_root="$(cd ../.. && pwd)"
+SBTIX_GEN_ALL2="${SBTIX_GEN_ALL2:-${repo_root}/result/bin/sbtix-gen-all2}"
+if [[ ! -x "${SBTIX_GEN_ALL2}" ]]; then
+  if command -v sbtix-gen-all2 >/dev/null 2>&1; then
+    SBTIX_GEN_ALL2="sbtix-gen-all2"
+  else
+    echo "ERROR: sbtix-gen-all2 not found (checked '${SBTIX_GEN_ALL2}' and PATH)." >&2
+    echo "       Set SBTIX_GEN_ALL2 or build sbtix so '${repo_root}/result/bin/sbtix-gen-all2' exists." >&2
+    exit 1
+  fi
+fi
 
 pushd one
 sbt --error publishLocal
