@@ -9,64 +9,14 @@ ensure_local_sbtix_source() {
     return
   fi
 
-  # Auto-export the current sbtix checkout so generated files fetch the exact
-  # tree we are testing. Optional in CI, but removes manual setup for dev work.
-  if ! command -v nix >/dev/null 2>&1; then
-    echo "nix not available; falling back to packaged sbtix metadata" >&2
-    return
-  fi
-
-  local repo_root
-  repo_root="$(cd ../.. && pwd)"
-
-  # Read the current git revision without invoking `git`. This keeps the test
-  # runner hermetic and avoids relying on a particular git version/config.
-  local git_dir
-  git_dir="${repo_root}/.git"
-  if [[ -f "${git_dir}" ]]; then
-    local gitdir_pointer
-    gitdir_pointer="$(sed -n 's/^gitdir: //p' "${git_dir}")"
-    if [[ -z "${gitdir_pointer}" ]]; then
-      echo "Unable to resolve gitdir for ${repo_root}; falling back to packaged sbtix metadata" >&2
-      return
-    fi
-    if [[ "${gitdir_pointer}" = /* ]]; then
-      git_dir="${gitdir_pointer}"
-    else
-      git_dir="${repo_root}/${gitdir_pointer}"
-    fi
-  fi
-
-  if [[ ! -f "${git_dir}/HEAD" ]]; then
-    echo "No git HEAD found for ${repo_root}; falling back to packaged sbtix metadata" >&2
-    return
-  fi
-
-  local head
-  head="$(cat "${git_dir}/HEAD")"
-  local rev
-  rev=""
-  if [[ "${head}" =~ ^ref:\ (.*)$ ]]; then
-    local ref_path
-    ref_path="${BASH_REMATCH[1]}"
-    if [[ -f "${git_dir}/${ref_path}" ]]; then
-      rev="$(cat "${git_dir}/${ref_path}")"
-    elif [[ -f "${git_dir}/packed-refs" ]]; then
-      rev="$(awk -v ref="${ref_path}" '$1 !~ /^#/ && $1 !~ /^\^/ && $2 == ref { print $1; exit }' "${git_dir}/packed-refs")"
-    fi
-  else
-    rev="${head}"
-  fi
-
-  rev="$(echo -n "${rev}" | tr -d '\n' | tr -d '\r')"
-  if [[ -z "${rev}" ]]; then
-    echo "Unable to determine git revision for ${repo_root}; falling back to packaged sbtix metadata" >&2
-    return
-  fi
-
-  export SBTIX_SOURCE_URL="${SBTIX_SOURCE_URL:-https://github.com/natural-transformation/sbtix}"
-  export SBTIX_SOURCE_REV="${SBTIX_SOURCE_REV:-${rev}}"
-  export SBTIX_SOURCE_NAR_HASH="${SBTIX_SOURCE_NAR_HASH:-$(nix hash path --sri "$repo_root")}"
+  # The sbtix wrapper (whether coming from ./result or from Nix) is responsible
+  # for exporting a consistent sbtix source pin (rev + narHash) when available.
+  #
+  # Do NOT attempt to synthesize (rev, narHash) here from a working tree: the
+  # narHash would include local state (and often `.git`), which does not match
+  # the corresponding upstream revision and will cause Nix "NAR hash mismatch"
+  # failures when the generated nix tries to fetch from GitHub.
+  return
 }
 
 ensure_local_sbtix_source
