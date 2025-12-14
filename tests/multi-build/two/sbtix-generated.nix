@@ -14,7 +14,7 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
-  sbtixSource = /nix/store/rkvjazq1c5ld5ycv1fayiixv50fsc36s-source;
+  sbtixSource = /nix/store/0qgha8aipgpnsyx8h26738xyk24fhc45-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))
@@ -70,55 +70,55 @@ in
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
 
-              ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
-              mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
-              if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
-                cp "$pluginJar" $ivyDir/jars/sbtix.jar
-              else
-                echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
-                exit 1
-              fi
-                cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
-                  <project xmlns="http://maven.apache.org/POM/4.0.0"
-                           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                           xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-                    <modelVersion>4.0.0</modelVersion>
-                    <groupId>se.nullable.sbtix</groupId>
-                    <artifactId>sbtix</artifactId>
-                    <version>${pluginVersion}</version>
-                    <name>sbtix Plugin</name>
-                    <description>Locally provided sbtix plugin for Nix build</description>
-                    <packaging>jar</packaging>
-                  </project>
-              POM_EOF
-                cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
-                  <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
-                    <info organisation="se.nullable.sbtix"
-                          module="sbtix"
-                          revision="${pluginVersion}"
-                          status="release"
-                          publication="1765577480554"
-                          e:sbtVersion="1.0"
-                          e:scalaVersion="2.12">
-                      <description>
-                        sbtix plugin (locally provided for Nix build)
-                      </description>
-                    </info>
-                    <configurations>
-                      <conf name="compile" visibility="public" description=""/>
-                      <conf name="default" visibility="public" description="" extends="compile"/>
-                      <conf name="master" visibility="public" description=""/>
-                      <conf name="provided" visibility="public" description=""/>
-                      <conf name="runtime" visibility="public" description="" extends="compile"/>
-                      <conf name="sources" visibility="public" description=""/>
-                      <conf name="test" visibility="public" description="" extends="runtime"/>
-                    </configurations>
-                    <publications>
-                      <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
-                    </publications>
-                    <dependencies></dependencies>
-                  </ivy-module>
-              IVY_EOF
-              ln -sf ivy.xml $ivyDir/ivys/ivy-${pluginVersion}.xml
+ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
+mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
+if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
+  cp "$pluginJar" $ivyDir/jars/sbtix.jar
+else
+  echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
+  exit 1
+fi
+  cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
+    <project xmlns="http://maven.apache.org/POM/4.0.0"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+      <modelVersion>4.0.0</modelVersion>
+      <groupId>se.nullable.sbtix</groupId>
+      <artifactId>sbtix</artifactId>
+      <version>${pluginVersion}</version>
+      <name>sbtix Plugin</name>
+      <description>Locally provided sbtix plugin for Nix build</description>
+      <packaging>jar</packaging>
+    </project>
+POM_EOF
+  cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
+    <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
+      <info organisation="se.nullable.sbtix"
+            module="sbtix"
+            revision="${pluginVersion}"
+            status="release"
+            publication="1765730180373"
+            e:sbtVersion="1.0"
+            e:scalaVersion="2.12">
+        <description>
+          sbtix plugin (locally provided for Nix build)
+        </description>
+      </info>
+      <configurations>
+        <conf name="compile" visibility="public" description=""/>
+        <conf name="default" visibility="public" description="" extends="compile"/>
+        <conf name="master" visibility="public" description=""/>
+        <conf name="provided" visibility="public" description=""/>
+        <conf name="runtime" visibility="public" description="" extends="compile"/>
+        <conf name="sources" visibility="public" description=""/>
+        <conf name="test" visibility="public" description="" extends="runtime"/>
+      </configurations>
+      <publications>
+        <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
+      </publications>
+      <dependencies></dependencies>
+    </ivy-module>
+IVY_EOF
+ln -sf ivy.xml $ivyDir/ivys/ivy-${pluginVersion}.xml
     '';
   }

@@ -239,6 +239,12 @@ in rec {
             # COURSIER_CACHE env variable is needed if one wants to use non-sbtix repositories in the below repo list, which is sometimes useful.
             COURSIER_CACHE = "./.cache/coursier/v1";
 
+            # Marker for sbt builds running under the Nix sandbox.
+            #
+            # Some projects use this to disable tasks that would otherwise try to
+            # download tools at build time (e.g. scalafmt downloads its core jars).
+            SBTIX_NIX_BUILD = "1";
+
             # set environment variable to affect all SBT commands
             SBT_OPTS = ''
               -Dsbt.ivy.home=./.ivy2/
@@ -248,6 +254,7 @@ in rec {
               -Dsbt.override.build.repos=true
               -Dsbt.repository.config=${sbtixRepos}
               -Dsbt.offline=true
+              -Dsbtix.nixBuild=true
               ${sbtOptions}
             '';
 

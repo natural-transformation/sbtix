@@ -265,7 +265,11 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val pluginVersionReplacement =
       if (sourceBlock.block.nonEmpty) "${pluginVersion}"
       else pluginVersion
-    val snippet = pluginBootstrapSnippet(pluginVersionReplacement, timestamp, "              ", scalaBin, sbtBin)
+    // Do NOT indent the bootstrap snippet: it contains heredoc delimiters
+    // (POM_EOF/IVY_EOF) that must start at column 0 for bash to terminate the
+    // heredocs correctly. Indenting would produce "here-document delimited by
+    // end-of-file" warnings and can truncate the build script.
+    val snippet = pluginBootstrapSnippet(pluginVersionReplacement, timestamp, "", scalaBin, sbtBin)
     val pluginJarEnvLine = sys.env
       .get("SBTIX_PLUGIN_JAR_PATH")
       .filter(_.nonEmpty)
@@ -493,14 +497,28 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Get all resolvers and dependencies
       val projectResolvers = externalResolvers.value.toSet
       val projectCredentials = credentials.value.toSet
-      val dependencies =
+      val scalaVer = scalaVersion.value
+      val sbtVer = sbtVersion.value
+
+      // sbt itself downloads some "tooling" artifacts during compilation, even
+      // when they are not declared as normal project/library dependencies.
+      //
+      // In particular, Scala 3 builds require `org.scala-lang:scala3-sbt-bridge`
+      // which is fetched by sbt/Zinc. In the Nix sandbox (offline builds), sbt
+      // cannot download it, so we must lock it in `repo.nix`.
+      val sbtToolingDeps: Set[Dependency] =
+        if (scalaVer.startsWith("3.")) {
+          val bridge = ModuleID("org.scala-lang", "scala3-sbt-bridge", scalaVer)
+          log.info(s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala 3 builds: ${bridge.organization}:${bridge.name}:${bridge.revision}")
+          Set(Dependency(bridge))
+        } else Set.empty
+
+      val dependencies: Set[Dependency] =
         filterLockableModules(
           (Compile / allDependencies).value,
           log,
           "sbtixGenerate"
-        ).map(Dependency(_)).toSet
-      val scalaVer = scalaVersion.value
-      val sbtVer = sbtVersion.value
+        ).map(Dependency(_)).toSet ++ sbtToolingDeps
       
       // Create artifact fetcher and fetch all artifacts
       val fetcher = new CoursierArtifactFetcher(
@@ -812,7 +830,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         val refreshed = IO.read(targetSbtixNix)
         val hasLocalRepoMarker = refreshed.contains("localBuildsRepo")
         val hasCopyMarker = refreshed.contains("cp -RL ${localBuildsRepo}/.")
-        if (!hasLocalRepoMarker || !hasCopyMarker) {
+        val hasNixBuildMarker =
+          refreshed.contains("sbtix.nixBuild") || refreshed.contains("SBTIX_NIX_BUILD")
+        if (!hasLocalRepoMarker || !hasCopyMarker || !hasNixBuildMarker) {
           val resourceCandidates = Seq("templates/sbtix.nix", "nix-exprs/sbtix.nix")
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
