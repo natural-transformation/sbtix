@@ -12,8 +12,9 @@ let
     else "";
 in
 sbtix.buildSbtLibrary {
-  name = "sbtix-multibuild-one";
+  name = "sbtix-multibuild-two";
   src = ./.;
   repo = [ repoLock projectRepo manualRepo ];
   sbtixBuildInputs = sbtixInputs;
 }
+

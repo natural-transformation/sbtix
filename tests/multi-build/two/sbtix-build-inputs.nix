@@ -6,4 +6,7 @@
 # update the nix definitions for building the project.
 { pkgs ? import <nixpkgs> {} }:
 
-pkgs.callPackage ../one {}
+let
+  sbtix = pkgs.callPackage ../one/sbtix.nix {};
+in
+pkgs.callPackage ../one/one.nix { inherit sbtix; }

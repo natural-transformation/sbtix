@@ -239,15 +239,22 @@ in rec {
             # COURSIER_CACHE env variable is needed if one wants to use non-sbtix repositories in the below repo list, which is sometimes useful.
             COURSIER_CACHE = "./.cache/coursier/v1";
 
+            # Marker for sbt builds running under the Nix sandbox.
+            #
+            # Some projects use this to disable tasks that would otherwise try to
+            # download tools at build time (e.g. scalafmt downloads its core jars).
+            SBTIX_NIX_BUILD = "1";
+
             # set environment variable to affect all SBT commands
             SBT_OPTS = ''
               -Dsbt.ivy.home=./.ivy2/
-              -Dsbt.boot.directory=./.sbt/boot/
+              -Dsbt.boot.directory=./.sbt-boot
               -Dsbt.global.base=./.sbt
               -Dsbt.global.staging=./.staging
               -Dsbt.override.build.repos=true
               -Dsbt.repository.config=${sbtixRepos}
               -Dsbt.offline=true
+              -Dsbtix.nixBuild=true
               ${sbtOptions}
             '';
 
@@ -266,6 +273,13 @@ in rec {
 
               # Setup local directory for plugin
               ${pluginBootstrap}
+
+              if [ -d ${sbt}/share/sbt/boot ]; then
+                echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
+                mkdir -p ./.sbt-boot
+                cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
+                chmod -R u+w ./.sbt-boot || true
+              fi
 
               echo "[SBTIX_NIX_DEBUG] localBuildsRepo='${localBuildsRepo}'"
               if [ -n "${localBuildsRepo}" ]; then
@@ -333,6 +347,12 @@ in rec {
           localHome="$(pwd)/.sbt-home"
           localCache="$localHome/.cache"
           mkdir -p "$localHome" "$localCache"
+          if [ -d ${sbt}/share/sbt/boot ]; then
+            echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
+            mkdir -p ./.sbt-boot
+            cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
+            chmod -R u+w ./.sbt-boot || true
+          fi
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
           HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
@@ -354,6 +374,12 @@ in rec {
           localHome="$(pwd)/.sbt-home"
           localCache="$localHome/.cache"
           mkdir -p "$localHome" "$localCache"
+          if [ -d ${sbt}/share/sbt/boot ]; then
+            echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
+            mkdir -p ./.sbt-boot
+            cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
+            chmod -R u+w ./.sbt-boot || true
+          fi
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
           HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage
           mkdir -p $out/

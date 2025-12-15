@@ -1,12 +1,24 @@
-{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand, jdk, jre, sbt }:
+{ callPackage, writeText, writeScriptBin, stdenv, runtimeShell, runCommand
+, jdk, jre, sbt, selfSourceInfo ? {}
+}:
 let
-  version = "0.4";
+  version = "0.4.1";
   versionSnapshotSuffix = "-SNAPSHOT";
   pluginVersion = "${version}${versionSnapshotSuffix}";
+
+  # Prefer flake-provided source info; fall back to environment overrides so
+  # dev shells and tests pin the exact working tree used to build this wrapper.
+  sourceUrl = "https://github.com/natural-transformation/sbtix";
+  sourceRev = selfSourceInfo.rev or (builtins.getEnv "SBTIX_SOURCE_REV");
+  sourceNarHash = selfSourceInfo.narHash or (builtins.getEnv "SBTIX_SOURCE_NAR_HASH");
+  sourcePath = selfSourceInfo.outPath or (builtins.getEnv "SBTIX_SOURCE_PATH");
 
   pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
     version = pluginVersion;
   };
+
+  sbtixPluginJarPath =
+    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
 
   sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
     [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
@@ -48,7 +60,12 @@ let
     substitute ${./src/sbtix.sh} $out/bin/sbtix \
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
+      --replace @pluginJar@ ${sbtixPluginJarPath} \
       --replace @sbt@ ${sbt}/bin/sbt \
+      --replace @sourceRev@ "${sourceRev}" \
+      --replace @sourceNarHash@ "${sourceNarHash}" \
+      --replace @sourceUrl@ "${sourceUrl}" \
+      --replace @sourcePath@ "${sourcePath}" \
       ;
     chmod a+x $out/bin/sbtix
   '';

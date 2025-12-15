@@ -1,6 +1,6 @@
 # Sbtix
 
-[![Build Status](https://github.com/github/docs/actions/workflows/main.yml/badge.svg?branch=master)](https://hercules-ci.com/github/natural-transformation/sbtix)
+[Build status (Hercules CI)](https://hercules-ci.com/github/natural-transformation/sbtix)
 
 ## What?
 
@@ -19,16 +19,16 @@ Additionally, this means that Nix can do a better job of enforcing purity where 
 
 When you run `sbtix genNix` / `genComposition`, the plugin orchestrates three steps:
 
-1. **Collect dependencies:** Sbtix walks your sbt build, resolves everything with Coursier (using your resolvers + credentials), and emits a locked `repo.nix`. Private repositories keep their own namespace (e.g. `nix-private-demo`) so you can see where each artifact originates.
-2. **Generate the composition:** The plugin renders `default.nix` from a shared template. That template sets up sandbox-safe caches, writes the sbtix plugin into a local Ivy repo so sbt can run offline, invokes `sbt compile`/`stage`, and copies every `*/target/universal/stage` tree into `$out`. If no staged binaries exist the build fails loudly, which means `nix-build` produces the same runnable outputs that `sbt stage` would.
-3. **Consume from Nix:** The generated `default.nix` can be used as-is, or you can call the helpers in `plugin/nix-exprs/sbtix.nix` (`buildSbtProgram`, `buildSbtLibrary`, etc.) if you need a different layout. Either way, the derivation reads the locked `repo.nix` files and the staged application copied in step 2, so builds are reproducible and network-free.
+1. **Collect dependencies:** Sbtix walks your sbt build, resolves everything with Coursier (using your resolvers + credentials), and emits a locked `repo.nix`. Private repositories keep their own namespace (e.g. `nix-private-demo`) so you can see where each artifact originates. For Scala 3 builds, sbtix also locks sbt tooling such as `org.scala-lang:scala3-sbt-bridge` so sbt can compile offline in the Nix sandbox.
+2. **Generate the composition:** The plugin now renders **`sbtix-generated.nix`**, the machine-written derivation that wires together `repo.nix`, the plugin bootstrap, and the staging/install logic. If there is no `default.nix` in your project yet, sbtix drops in a tiny example that simply imports `./sbtix-generated.nix`. Your own `default.nix` is never overwritten again.
+3. **Consume from Nix:** Import the generated file (`import ./sbtix-generated.nix { inherit pkgs; }`) from your project’s `default.nix`, or call the helpers in `plugin/nix-exprs/sbtix.nix` (`buildSbtProgram`, `buildSbtLibrary`, etc.) if you need a different layout. Either way, the derivation reads the locked `repo.nix` files and the staged application copied in step 2, so builds are reproducible and network-free. The Nix build environment also sets `SBTIX_NIX_BUILD=1` and `-Dsbtix.nixBuild=true` so your build can disable tasks that would otherwise try to download tooling (e.g. scalafmt).
 
 This pipeline keeps your sbt workflow fast (dependency metadata is cached) while ensuring the Nix derivation is always in sync with what the sbt plugin produces.
 
 ## Why not? (caveats)
 
-* Alpha quality, beware (and please report any issues!)
-* Nix file for SBT compiler interface dependencies must currently be created manually.
+* Pre-1.0 / beta: used in production, but expect occasional breaking changes while the API and Nix/SBT integration stabilizes. Please report any issues!
+* Some sbt-internal tooling artifacts are not declared as normal project/library dependencies. sbtix locks the Scala 3 compiler bridge (`org.scala-lang:scala3-sbt-bridge`) automatically, but you may still need to add rare missing artifacts to `manual-repo.nix`.
 
 ## How?
 
@@ -54,10 +54,18 @@ sbtix provides a number of scripts to generate and update Nix expressions to fet
  * `sbtix-gen-all` - gen build and plugin dependencies, produces `repo.nix` and `project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix`
  * `sbtix-gen-all2` - gen build, plugin and pluginplugin dependencies, produces `repo.nix`, `project/repo.nix`, and `project/project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix "reload plugins" genNix`
 
+#### Typical regeneration flow
+
+1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`). Check these files into VCS so CI and teammates get the same locks.
+2. `sbtix genComposition` – renders `sbtix-generated.nix` using the shared template.
+   - When sbtix is run from a flake-provided binary (or when `SBTIX_SOURCE_URL`, `SBTIX_SOURCE_REV`, and `SBTIX_SOURCE_NAR_HASH` are set), the generated file embeds a pinned `builtins.fetchTree`/`fetchgit` block that points back to the exact sbtix revision you used for generation. This keeps flake evaluation pure.
+   - If those pins are not available, sbtix cannot emit a portable, flake-pure-safe source reference. In that case, regenerate using a flake-provided sbtix (or provide the pins) before running `nix build` in a downstream flake.
+3. Commit the refreshed `repo.nix` files (and the generated `.nix` files you intend to keep, e.g. `sbtix-generated.nix`) before running `nix build`.
+
 ### Creating a build
 
- * run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `default.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is unless you need custom behaviour.
- * if you do need to hand-roll the derivation, the snippet below shows how to call `sbtix.buildSbtProgram` directly. (Use `buildSbtLibrary` if you are packaging a library or `buildSbtProject` for a custom `installPhase`.)
+* run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `sbtix-generated.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is and have your `default.nix` (or another entry point) simply import it.
+* if you do need to hand-roll the derivation, the snippet below shows how to call `sbtix.buildSbtProgram` directly. (Use `buildSbtLibrary` if you are packaging a library or `buildSbtProject` for a custom `installPhase`.) You can keep your custom logic in `default.nix` while still generating `sbtix-generated.nix` for reference.
 
 If you want a starting point, copy `default.nix.example` from this repository into your project and adapt it. The root-level `default.nix` now just raises an error so it no longer looks like part of the build.
 
@@ -82,9 +90,9 @@ in
     }
 ```
 
- * generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
- * (optional) rerun `sbtix genComposition` after changing dependencies to regenerate `default.nix` so it stays in sync with the template.
- * check the generated nix files into your source control.
+* generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
+* rerun `sbtix genComposition` after changing dependencies to regenerate `sbtix-generated.nix` so it stays in sync with both the template and the sbtix revision you are using.
+* check the generated nix files (including `sbtix-generated.nix`) into your source control.
  * finally, run `nix-build` to build!
  * any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.
 

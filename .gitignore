@@ -4,6 +4,10 @@ target
 result
 tests/**/repo.nix
 tests/*/repo.nix
+
+# sbtix tests generate these files at runtime; they should not be checked in.
+tests/**/sbtix.nix
+tests/**/sbtix-plugin-repo.nix
 .ensime_cache
 .ensime
 .bloop
@@ -19,5 +23,3 @@ metals.sbt
 .sbt-global
 .coursier-cache
 .ivy2-home
-
-tests/template-generation/default.nix

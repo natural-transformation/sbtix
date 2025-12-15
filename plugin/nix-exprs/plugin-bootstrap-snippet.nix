@@ -57,15 +57,18 @@ let
 in ''
 ivyDir="./.ivy2-home/local/${metadata.organization}/${metadata.artifact}/scala_${scalaVersion}/sbt_${sbtVersion}/${version}"
 mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
-if [ -f ./sbtix-plugin-under-test.jar ]; then
-  cp ./sbtix-plugin-under-test.jar "$ivyDir/jars/${metadata.artifact}.jar"
-  cat <<'POM_EOF' > "$ivyDir/poms/${metadata.artifact}-${version}.pom"
+if [ -n "${pluginJar:-}" ] && [ -f "${pluginJar}" ]; then
+  cp "${pluginJar}" "$ivyDir/jars/${metadata.artifact}.jar"
+else
+  echo "sbtix: unable to locate plugin jar. Provide sbtixTool with source metadata or rerun sbtix genComposition." 1>&2
+  exit 1
+fi
+cat <<'POM_EOF' > "$ivyDir/poms/${metadata.artifact}-${version}.pom"
 ${pomXml}
 POM_EOF
-  cat <<'IVY_EOF' > "$ivyDir/ivys/ivy.xml"
+cat <<'IVY_EOF' > "$ivyDir/ivys/ivy.xml"
 ${ivyXml}
 IVY_EOF
-  ln -sf ivy.xml "$ivyDir/ivys/ivy-${version}.xml"
-fi
+ln -sf ivy.xml "$ivyDir/ivys/ivy-${version}.xml"
 ''
 
