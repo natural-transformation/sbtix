@@ -13,7 +13,9 @@ When you touch the templates under `plugin/src/main/resources/sbtix/` (for examp
 (cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=0.4.1-SNAPSHOT "clean" "genNix" "genComposition")
 ```
 
-and copying the resulting `sbtix-generated.nix` (and example `default.nix` if you removed it) back into `expected/**`. Repeat for any other scripted test that asserts on the generated files (e.g. `sbtix/private-auth`). This keeps the checked-in expectations aligned with the template.  
+The scripted tests only check in and assert on the locked `repo.nix` files (`expected/repo.nix` and `expected/project-repo.nix`).  
+`sbtix-generated.nix` is generated at runtime and is intentionally **not** checked in for scripted tests (it includes store paths and timestamps).  
+If you intentionally change the generator output, update the expectations by copying `repo.nix` and `project/repo.nix` from the test directory into `expected/**` for the relevant suite (repeat for `sbtix/private-auth` as needed).  
 If you are testing a local sbtix change and want generated Nix files to stay flake-pure-safe, follow “Local sbtix checkouts” below.
 
 ## Updating the plugin's Nix lockfiles

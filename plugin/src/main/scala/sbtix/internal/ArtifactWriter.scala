@@ -1,11 +1,10 @@
 package sbtix.internal
 
 import java.io.{File, PrintWriter}
-// import coursier.core.Artifact // Previous attempt
-import coursier.util.Artifact // Correct import based on v2.1.17 source
+import coursier.util.Artifact
 import coursier.core.{Authentication, Attributes, Type, Classifier}
 import upickle.default._
-import upickle.default.{ReadWriter => RW, macroRW => MMW} // Alias for brevity below if needed
+import upickle.default.{ReadWriter => RW, macroRW => MMW}
 
 object ArtifactWriter {
 

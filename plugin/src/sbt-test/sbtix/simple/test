@@ -1,4 +1,4 @@
-# Test to verify the plugin works with Coursier 2.1.17
+# Test to verify the plugin works with Coursier 2.1.24
 > compile
 > sbtixGenerate
 $ exists repo.nix
@@ -11,13 +11,14 @@ $ must-mirror project/repo.nix expected/project-repo.nix
 > genComposition
 $ exists default.nix
 
-# Run nix-build to verify the whole build works with Coursier 2.1.17 compatibility
+# Run nix-build to verify the whole build works with Coursier 2.1.24 compatibility
 $ exec rm -rf result
 $ exec nix-build
 $ exists result
 
-# Verify the default.nix contains the correct symlink strategy for Coursier 2.1.17 compatibility
-$ exec expected/ivy-file-test.sh default.nix
+# Verify the generated Nix contains the correct symlink strategy for Coursier 2.1.24 compatibility
+$ exec grep -q 'cat <<IVY_EOF > $ivyDir/ivys/ivy.xml' sbtix-generated.nix
+$ exec grep -q 'ln -sf ivy.xml' sbtix-generated.nix
 
 # Test the generated executable
 $ exec result/bin/three
