@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.{File, PrintWriter}
 import se.nullable.sbtix.Utils
 import se.nullable.sbtix.{CoursierArtifactFetcher, Dependency, NixArtifact, NixRepo}
-import sbt.librarymanagement.{MavenRepository, ScalaModuleInfo}
+import sbt.librarymanagement.{MavenRepository, Patterns, ScalaModuleInfo}
 import sbt.{Logger, ModuleID, Resolver}
 
 class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
@@ -33,7 +33,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     def log(level: sbt.Level.Value, message: => String): Unit = println(s"[$level] $message")
   }
   
-  "CoursierArtifactFetcher" should "work with Coursier 2.1.17" in {
+  "CoursierArtifactFetcher" should "work with Coursier" in {
     // Create a simple resolver and dependencies setup
     val resolvers = Set[Resolver](
       MavenRepository("central", "https://repo1.maven.org/maven2")
@@ -70,4 +70,29 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       println(s"Artifact: ${a.repoName}/${a.relativePath} - ${a.sha256}")
     }
   }
-} 
+
+  it should "preserve Ivy resolver patterns for sbt plugin repositories" in {
+    val ivyPattern =
+      "[organisation]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)([branch]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
+
+    val sbtPluginReleases =
+      Resolver.url(
+        "sbt-plugin-releases",
+        sbt.url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+      )(Patterns(ivyPattern))
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      Set(sbtPluginReleases),
+      Set.empty,
+      "2.12.20",
+      "2.12"
+    )
+
+    // We don't need to resolve any real dependencies to validate that we emit the correct
+    // repo pattern in `repo.nix`. The bug we saw was that patterns were dropped (empty string).
+    val (repos, _, _, _) = fetcher(Set.empty)
+
+    repos should contain(NixRepo("nix-sbt-plugin-releases", ivyPattern))
+  }
+}

@@ -256,7 +256,8 @@ class CoursierArtifactFetcher(
         if (isIvyLocalRoot(normalizedRoot)) None
         else {
           val repoName = determineRepoName(resolver.name, normalizedRoot)
-          Some(RepoDescriptor(repoName, normalizedRoot, NixRepo(repoName)))
+          val pattern = extractPattern(resolver).map(resolveIvyVariables).getOrElse("")
+          Some(RepoDescriptor(repoName, normalizedRoot, NixRepo(repoName, pattern)))
         }
       }
     }.toSeq
@@ -539,6 +540,31 @@ class CoursierArtifactFetcher(
         val idx = pattern.indexOf('[')
         val base = if (idx > 0) pattern.substring(0, idx) else pattern
         Option(base).filter(_.nonEmpty)
+      }
+    case _ => None
+  }
+
+  /** Extract the repository-relative Ivy pattern from a resolver (everything from the first
+    * '[' onwards). This is what sbt expects in `repositories` config entries for Ivy-style repos.
+    *
+    * Example:
+    *   "https://repo.scala-sbt.org/.../sbt-plugin-releases/[organisation]/[module]/.../ivy.xml"
+    * becomes:
+    *   "[organisation]/[module]/.../ivy.xml"
+    */
+  private def extractPattern(resolver: Resolver): Option[String] = resolver match {
+    case _: MavenRepository => None
+    case p: PatternsBasedRepository if p.patterns.artifactPatterns.nonEmpty =>
+      p.patterns.artifactPatterns.headOption.flatMap { full =>
+        val idx = full.indexOf('[')
+        if (idx >= 0 && idx < full.length) Option(full.substring(idx)).filter(_.nonEmpty)
+        else None
+      }
+    case u: URLRepository if u.patterns.artifactPatterns.nonEmpty =>
+      u.patterns.artifactPatterns.headOption.flatMap { full =>
+        val idx = full.indexOf('[')
+        if (idx >= 0 && idx < full.length) Option(full.substring(idx)).filter(_.nonEmpty)
+        else None
       }
     case _ => None
   }

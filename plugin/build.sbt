@@ -31,29 +31,25 @@ pgpSecretRing := pgpPublicRing.value
 enablePlugins(SbtPlugin)
 
 scriptedLaunchOpts ++= Seq(
-  s"-Dplugin.version=${version.value}"
+  s"-Dplugin.version=${version.value}",
+  // Scripted tests run sbt directly (not via the sbtix wrapper). Provide the minimum
+  // metadata needed for `genComposition` to generate store-backed plugin bootstrap:
+  // - `sbtix.sourcePath` lets Nix build the sbtix plugin from this checkout (nix-build flow)
+  // - `sbtix.pluginJarPath` pins the loaded plugin jar so we can detect stale classpaths
+  s"-Dsbtix.sourcePath=${baseDirectory.value.getParentFile.getAbsolutePath}",
+  s"-Dsbtix.pluginJarPath=${(Path.userHome / ".ivy2" / "local" / "se.nullable.sbtix" / "sbtix" / "scala_2.12" / "sbt_1.0" / version.value / "jars" / "sbtix.jar").getAbsolutePath}"
 )
 scriptedBufferLog := false
 
 // Explicitly set the sbt version for scripted tests
 scriptedSbt := sbtVersion.value
 
-// Ensure the sbtix plugin JAR is copied into the test project source before scripted tests run
+// Scripted tests must not create or require JARs inside the test projects.
+// We bootstrap the plugin from Nix (see `sbtix.sourcePath` above) and keep the
+// sbtix plugin itself available via `publishLocal`.
 scriptedDependencies := {
   val log = streams.value.log
-  log.info("[SBTIX_PRE_SCRIPTED] scriptedDependencies starting...")
-  val sbtixPluginJar = (Compile / packageBin).value // Get the packaged sbtix plugin JAR
-  log.info(s"[SBTIX_PRE_SCRIPTED] Source plugin JAR: ${sbtixPluginJar.getAbsolutePath}, Exists: ${sbtixPluginJar.exists()}")
-
-  // Path to the specific scripted test project's source directory
-  // This copies it into src/sbt-test/sbtix/simple/, and scripted will then copy this to the temp test dir.
-  val testProjectSourceDir = baseDirectory.value / "src" / "sbt-test" / "sbtix" / "simple"
-  val targetJarInTestProjectSource = testProjectSourceDir / "sbtix-plugin-under-test.jar"
-  log.info(s"[SBTIX_PRE_SCRIPTED] Target in test source: ${targetJarInTestProjectSource.getAbsolutePath}")
-
-  IO.createDirectory(testProjectSourceDir) // Ensure the directory exists
-  IO.copyFile(sbtixPluginJar, targetJarInTestProjectSource, preserveLastModified = true)
-  log.info(s"[SBTIX_PRE_SCRIPTED] Copied JAR. Target exists: ${targetJarInTestProjectSource.exists()}")
+  log.info("[SBTIX_PRE_SCRIPTED] scriptedDependencies: no-op (no workspace JAR bootstrap)")
 }
 
 // Ensure scripted runs with the freshly published plugin in the local Ivy cache

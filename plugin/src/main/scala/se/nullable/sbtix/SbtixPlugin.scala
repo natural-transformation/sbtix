@@ -695,22 +695,39 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           }
       val bootstrapTimestamp = System.currentTimeMillis().toString
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
+
+      // The sbtix plugin itself is an sbt plugin (loaded by the sbt launcher), so it must be
+      // staged under the sbt-launcher Scala binary version (not the user's project Scala).
+      //
+      // For sbt 1.x this is currently Scala 2.12, but we derive it from sbt's own
+      // scalaProvider to avoid hardcoding it here.
+      val sbtScalaFullVersion = appConfiguration.value.provider.scalaProvider.version
+      val pluginScalaBinary = CrossVersion.binaryScalaVersion(sbtScalaFullVersion)
+      val pluginSbtBinary = sbtBinaryVersion.value
+      log.info(s"[SBTIX_DEBUG genComposition] sbt launcher Scala binary=${pluginScalaBinary}, sbt binary=${pluginSbtBinary}")
       
       val rawNixContent = sbtixNixContentTemplate.value(
         currentPluginVersion,
         sbtVersion.value,
-        scalaBinaryVersion.value,
-        sbtBinaryVersion.value
+        pluginScalaBinary,
+        pluginSbtBinary
       )
-      val hasStoreFetcher = rawNixContent.contains(StoreBootstrapMarker)
+      // Store-backed bootstrap is available when we either:
+      // - have a pinned sbtix source (rev + narHash) and can fetch/build the plugin in Nix, or
+      // - have an explicit source path (local checkout / store path) and can build the plugin in Nix, or
+      // - have an in-store plugin jar path exported by the sbtix wrapper.
+      //
+      // Note: the source-path fallback does not include `sbtixSourceFetcher`, so we must not
+      // rely solely on the `StoreBootstrapMarker` string check here.
+      val hasSbtixSourceBlock = resolveSbtixSourceBlock(currentPluginVersion).block.nonEmpty
       val hasPluginJarEnv = pluginJarEnv.isDefined
-      val usesStoreBootstrap = hasStoreFetcher || hasPluginJarEnv
+      val usesStoreBootstrap = hasSbtixSourceBlock || hasPluginJarEnv
       val templatedNixContent =
         rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
       if (usesStoreBootstrap)
         log.info("[SBTIX_DEBUG genComposition] Store-backed plugin bootstrap detected; no workspace jar required.")
       else
-        sys.error("sbtix: store-backed plugin bootstrap missing; set SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH")
+        sys.error("sbtix: store-backed plugin bootstrap missing; set SBTIX_SOURCE_URL/REV/NAR_HASH, SBTIX_SOURCE_PATH, or SBTIX_PLUGIN_JAR_PATH")
 
       // Guard against stale plugin jars: refuse to proceed if the loaded plugin
       // code source path encodes a different version than the wrapper expects.
@@ -821,7 +838,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Render sbtix.nix template with runtime metadata (plugin version + bootstrap snippet)
       if (targetSbtixNix.exists()) {
         val raw = IO.read(targetSbtixNix)
-        val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp, scalaBinaryVersion.value, sbtBinaryVersion.value)
+        val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp, pluginScalaBinary, pluginSbtBinary)
         if (raw != rendered) {
           log.info(s"[SBTIX_DEBUG genComposition] Rendered sbtix.nix template for plugin version $currentPluginVersion")
           IO.write(targetSbtixNix, rendered)
@@ -837,7 +854,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
               log.warn(s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name")
-              val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp, scalaBinaryVersion.value, sbtBinaryVersion.value)
+              val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp, pluginScalaBinary, pluginSbtBinary)
               IO.write(targetSbtixNix, updated)
             case None =>
               log.warn("[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file")

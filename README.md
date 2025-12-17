@@ -29,6 +29,7 @@ This pipeline keeps your sbt workflow fast (dependency metadata is cached) while
 
 * Pre-1.0 / beta: used in production, but expect occasional breaking changes while the API and Nix/SBT integration stabilizes. Please report any issues!
 * Some sbt-internal tooling artifacts are not declared as normal project/library dependencies. sbtix locks the Scala 3 compiler bridge (`org.scala-lang:scala3-sbt-bridge`) automatically, but you may still need to add rare missing artifacts to `manual-repo.nix`.
+* **Offline sbt bootstrap is pinned:** the generated `sbtix-plugin-repo.nix` (seeded from sbtix’s bundled template under `plugin/sbtix-plugin-repo.nix`) only includes sbt launcher/bootstrap artifacts for the sbt version shipped with sbtix (currently sbt `1.10.7`, e.g. `org.scala-sbt:main_2.12:1.10.7`). If your project uses a different `sbt.version` in `project/build.properties`, a sandboxed/offline `nix build` can fail unless those sbt boot artifacts are also available offline (typically by aligning `sbt.version`, or by manually pinning the missing sbt artifacts in `manual-repo.nix`).
 
 ## How?
 
