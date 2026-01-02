@@ -32,6 +32,11 @@ enablePlugins(SbtPlugin)
 
 scriptedLaunchOpts ++= Seq(
   s"-Dplugin.version=${version.value}",
+  // Make sure the sbt processes spawned by `scripted` use the same user home
+  // directory as this sbt instance. Otherwise they may pick up a different
+  // ~/.ivy2 cache (e.g. the real home directory), which then trips sbtix's
+  // "plugin jar mismatch" guard.
+  s"-Duser.home=${Path.userHome.getAbsolutePath}",
   // Scripted tests run sbt directly (not via the sbtix wrapper). Provide the minimum
   // metadata needed for `genComposition` to generate store-backed plugin bootstrap:
   // - `sbtix.sourcePath` lets Nix build the sbtix plugin from this checkout (nix-build flow)
