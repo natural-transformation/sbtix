@@ -42,6 +42,12 @@ object SbtixPlugin extends AutoPlugin {
   private val GeneratedNixTemplateResource = "/sbtix/generated.nix.template"
   private val StoreBootstrapMarker = "sbtixSourceFetcher = {"
   private val GeneratedNixFileName = "sbtix-generated.nix"
+  // Keep generated Nix deterministic.
+  //
+  // The value below is only used as the Ivy `<info publication="...">` string
+  // in the bootstrap metadata we synthesize during Nix builds. It does not
+  // affect resolution, but it *does* affect diffs when regenerating nix files.
+  private val DefaultPublicationTimestamp = "0000000000000"
   
   private def indentMultiline(text: String, indent: String): String =
     text.linesIterator.map(line => indent + line).mkString("\n")
@@ -381,7 +387,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     * the same content without rerunning extra tooling.
     */
   private def generatedNixContentTemplate(currentPluginVersion: String, sbtBuildVersion: String, scalaBin: String, sbtBin: String): String = {
-    val timestamp = System.currentTimeMillis().toString
+    val timestamp = DefaultPublicationTimestamp
     renderSbtixTemplate(loadGeneratedNixTemplate(), currentPluginVersion, timestamp, scalaBin, sbtBin)
       .replace("{{PLUGIN_VERSION}}", currentPluginVersion)
       .replace("{{SBT_BUILD_VERSION}}", sbtBuildVersion)
@@ -693,7 +699,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           .getOrElse {
             sys.error(s"sbtix: unable to determine sbtix plugin version from jar path: ${pluginJarObserved.getOrElse("<unset>")}")
           }
-      val bootstrapTimestamp = System.currentTimeMillis().toString
+      val bootstrapTimestamp = DefaultPublicationTimestamp
       log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
 
       // The sbtix plugin itself is an sbt plugin (loaded by the sbt launcher), so it must be

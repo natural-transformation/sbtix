@@ -2,7 +2,10 @@
 
 ### Scripted
 
-`sbt scripted` runs the scripted tests. Note that for the `sbtix/private-auth` test you will need to have the `./serve-authenticated.py` server running. For example, `python3 serve-authenticated.py` in the nix shell. 
+Run the scripted tests via the `sbtix/*` group:
+`sbt "scripted sbtix/*"`.
+
+Note that for the `sbtix/private-auth` test you will need to have the `./serve-authenticated.py` server running. For example, `python3 serve-authenticated.py` in the nix shell. 
 
 To run one example, run `sbt scripted sbtix/simple`.
 
