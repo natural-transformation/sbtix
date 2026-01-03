@@ -2,7 +2,7 @@ sbtPlugin := true
 
 name         := "sbtix"
 organization := "se.nullable.sbtix"
-version      := "0.4.1-SNAPSHOT"
+version      := "0.5.0"
 
 publishTo := {
     if (isSnapshot.value) {
