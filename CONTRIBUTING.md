@@ -2,7 +2,11 @@
 
 ### Scripted
 
-`sbt scripted` runs the scripted tests. Note that for the `sbtix/private-auth` test you will need to have the `./serve-authenticated.py` server running. For example, `python3 serve-authenticated.py` in the nix shell. 
+`sbt scripted` runs all scripted suites under `plugin/src/sbt-test`.
+In this repository, the intended command is to run only the sbtix suites:
+`sbt "scripted sbtix/*"`.
+
+Note that for the `sbtix/private-auth` test you will need to have the `./serve-authenticated.py` server running. For example, `python3 serve-authenticated.py` in the nix shell. 
 
 To run one example, run `sbt scripted sbtix/simple`.
 
@@ -10,7 +14,7 @@ When you touch the templates under `plugin/src/main/resources/sbtix/` (for examp
 
 ```bash
 # NOTE: Keep `plugin.version` in sync with `plugin/build.sbt` (`version := ...`).
-(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=0.4.1-SNAPSHOT "clean" "genNix" "genComposition")
+(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=0.5.0 "clean" "genNix" "genComposition")
 ```
 
 The scripted tests only check in and assert on the locked `repo.nix` files (`expected/repo.nix` and `expected/project-repo.nix`).  

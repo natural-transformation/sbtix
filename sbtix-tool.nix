@@ -2,8 +2,8 @@
 , jdk, jre, sbt, selfSourceInfo ? {}
 }:
 let
-  version = "0.4.1";
-  versionSnapshotSuffix = "-SNAPSHOT";
+  version = "0.5.0";
+  versionSnapshotSuffix = "";
   pluginVersion = "${version}${versionSnapshotSuffix}";
 
   # Prefer flake-provided source info; fall back to environment overrides so

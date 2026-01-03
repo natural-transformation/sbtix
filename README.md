@@ -48,6 +48,60 @@ nix build '.#sbtix'
 
 sbtix provides a number of scripts to generate and update Nix expressions to fetch your dependencies and build your sbt project. These scripts work by opening your project in sbt and loading an additional sbtix plugin (via the `sbt.global.base` directory to `$HOME/.sbtix`). After generation, you don't need the sbtix command-line tools to actually build your project from nix.
 
+### Using sbtix from a flake (recommended)
+
+If your project is already a Nix flake, adding sbtix as a flake input is the most
+reliable way to keep generation reproducible and flake-pure-safe.
+
+Add an input and expose the sbtix CLI in your dev shell:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Prefer a tag (or pinned commit) so the sbtix input is stable.
+    sbtix.url = "github:natural-transformation/sbtix/v0.5.0";
+
+    # Optional: keep nixpkgs consistent across inputs.
+    sbtix.inputs.nixpkgs.follows = "nixpkgs";
+  };
+
+  outputs = { self, nixpkgs, sbtix, ... }:
+    let
+      system = "x86_64-linux"; # or use flake-parts / supported systems
+      pkgs = import nixpkgs { inherit system; };
+    in {
+      devShells.${system}.default = pkgs.mkShell {
+        packages = [
+          sbtix.packages.${system}.sbtix
+        ];
+      };
+    };
+}
+```
+
+Then regenerate inside the shell:
+
+```bash
+nix develop
+sbtix-gen-all2
+```
+
+When sbtix is run from a flake-provided binary, `sbtix-generated.nix` embeds a
+pinned sbtix source reference (`builtins.fetchTree` / `fetchgit`) so downstream
+flake evaluation stays pure.
+
+If you want to call sbtix’s Nix helpers directly from your flake, import them
+from the sbtix input:
+
+```nix
+let
+  sbtixLib = pkgs.callPackage "${sbtix}/plugin/nix-exprs/sbtix.nix" {};
+in
+  sbtixLib.buildSbtProgram { /* ... */ }
+```
+
 ### Sbtix commands
 
  * `sbtix` - loads the sbtix global plugin and launches sbt. Sets `sbt.global.base` directory to `$HOME/.sbtix`.
@@ -57,8 +111,8 @@ sbtix provides a number of scripts to generate and update Nix expressions to fet
 
 #### Typical regeneration flow
 
-1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`). Check these files into VCS so CI and teammates get the same locks.
-2. `sbtix genComposition` – renders `sbtix-generated.nix` using the shared template.
+1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`) **and runs `genComposition`** to render `sbtix-generated.nix`. Check these files into VCS so CI and teammates get the same locks.
+2. If you did not use `sbtix-gen-all2`, run `sbtix genComposition` to render `sbtix-generated.nix` using the shared template.
    - When sbtix is run from a flake-provided binary (or when `SBTIX_SOURCE_URL`, `SBTIX_SOURCE_REV`, and `SBTIX_SOURCE_NAR_HASH` are set), the generated file embeds a pinned `builtins.fetchTree`/`fetchgit` block that points back to the exact sbtix revision you used for generation. This keeps flake evaluation pure.
    - If those pins are not available, sbtix cannot emit a portable, flake-pure-safe source reference. In that case, regenerate using a flake-provided sbtix (or provide the pins) before running `nix build` in a downstream flake.
 3. Commit the refreshed `repo.nix` files (and the generated `.nix` files you intend to keep, e.g. `sbtix-generated.nix`) before running `nix build`.
