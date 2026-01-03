@@ -3,6 +3,20 @@ set -euo pipefail
 
 SBT_OPTS=${SBT_OPTS:-}
 
+# Ensure the JVM sees a consistent user home.
+#
+# Why: Nix shells / CI often set $HOME to a temp directory, but the Java
+# `user.home` property can still point at the real account home (or even
+# `/var/empty`). sbt (and sbtix) use `user.home` for Ivy local paths, which can
+# lead to stale plugin jars being loaded from a different location and trip the
+# "plugin jar mismatch" guard during `genComposition`.
+#
+# Keep `user.home` aligned with $HOME unless the caller intentionally set it.
+case "${SBT_OPTS}" in
+  *-Duser.home=*) ;;
+  *) SBT_OPTS="${SBT_OPTS} -Duser.home=${HOME}" ;;
+esac
+
 IVY_LOCAL="${HOME}/.ivy2/local/se.nullable.sbtix"
 if [ -d "${IVY_LOCAL}" ]; then
   echo "Deleting any cached sbtix plugins in '~/.ivy'. So the most recent version from nix is used."
