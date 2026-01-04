@@ -105,9 +105,12 @@ in
 ### Sbtix commands
 
  * `sbtix` - loads the sbtix global plugin and launches sbt. Sets `sbt.global.base` directory to `$HOME/.sbtix`.
- * `sbtix-gen` - gen build dependencies only, produces `repo.nix`. Alias: `sbtix genNix`.
- * `sbtix-gen-all` - gen build and plugin dependencies, produces `repo.nix` and `project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix`
- * `sbtix-gen-all2` - gen build, plugin and pluginplugin dependencies, produces `repo.nix`, `project/repo.nix`, and `project/project/repo.nix`. Alias: `sbtix genNix "reload plugins" genNix "reload plugins" genNix`
+ * `sbtix-gen` - generates `repo.nix` lockfiles (including nested `project/**/repo.nix` layers as needed). Internally runs: `sbtix genNix`.
+ * `sbtix-gen-all` - kept for backwards compatibility. Internally runs: `sbtix genNix`.
+ * `sbtix-gen-all2` - generates `repo.nix` lockfiles (including nested `project/**/repo.nix` layers) **and runs `genComposition`** to render `sbtix-generated.nix`. Internally runs: `sbtix genComposition`.
+
+By default, sbtix keeps verbose resolver diagnostics off for performance. To enable
+the full `[SBTIX_DEBUG]` output, set `SBTIX_DEBUG=1` (or pass `-Dsbtix.debug=true`).
 
 #### Typical regeneration flow
 

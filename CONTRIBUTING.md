@@ -22,6 +22,9 @@ The scripted tests only check in and assert on the locked `repo.nix` files (`exp
 If you intentionally change the generator output, update the expectations by copying `repo.nix` and `project/repo.nix` from the test directory into `expected/**` for the relevant suite (repeat for `sbtix/private-auth` as needed).  
 If you are testing a local sbtix change and want generated Nix files to stay flake-pure-safe, follow “Local sbtix checkouts” below.
 
+Tip: sbtix keeps verbose resolver diagnostics off by default for performance. To enable the
+full `[SBTIX_DEBUG]` output, set `SBTIX_DEBUG=1` (or pass `-Dsbtix.debug=true`).
+
 ## Updating the plugin's Nix lockfiles
 
 Whenever you change the plugin's dependencies (Coursier bumps, new libraries, etc.), regenerate the Nix locks under `plugin/` so the sandboxed builds stay reproducible:

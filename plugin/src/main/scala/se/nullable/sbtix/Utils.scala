@@ -5,8 +5,10 @@ import java.net.{HttpURLConnection, URL}
 import java.nio.channels.Channels
 import java.nio.file.{Files, Path}
 import java.security.{DigestInputStream, MessageDigest}
+import java.util.Locale
 import scala.annotation.tailrec
 import scala.util.{Failure, Success, Try}
+import sbt.Logger
 
 /**
  * Utility methods for sbtix
@@ -108,4 +110,33 @@ object Utils {
       urlToName(url)
     }
   }
-} 
+}
+
+/** Controls sbtix debug logging.
+  *
+  * Debug logs are intentionally **off by default** because dependency resolution
+  * can touch thousands of artifacts and logging each one is both slow and noisy.
+  *
+  * Enable by setting either:
+  * - environment variable `SBTIX_DEBUG=1`
+  * - system property `-Dsbtix.debug=true`
+  */
+object SbtixDebug {
+  private def isTruthy(value: String): Boolean = {
+    val v = value.trim.toLowerCase(Locale.ROOT)
+    v.nonEmpty && v != "0" && v != "false" && v != "no" && v != "off"
+  }
+
+  // Evaluate once per JVM. Debug is intended to be configured at process start.
+  private lazy val enabled0: Boolean =
+    sys.env.get("SBTIX_DEBUG").exists(isTruthy) ||
+      sys.props.get("sbtix.debug").exists(isTruthy)
+
+  def enabled: Boolean = enabled0
+
+  def info(log: Logger)(message: => String): Unit =
+    if (enabled) log.info(message)
+
+  def warn(log: Logger)(message: => String): Unit =
+    if (enabled) log.warn(message)
+}
