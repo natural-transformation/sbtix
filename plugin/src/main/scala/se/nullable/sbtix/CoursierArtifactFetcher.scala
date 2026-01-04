@@ -112,19 +112,25 @@ class CoursierArtifactFetcher(
     extraIvyProps.get("sbtBinaryVersion").orElse(extraIvyProps.get("sbtVersion"))
 
   def apply(depends: Set[SbtixDependency]): (Set[NixRepo], Set[NixArtifact], Set[ProvidedArtifact], Set[ResolutionErrors]) = {
-    logger.info(s"[SBTIX_DEBUG] Effective resolvers: ${effectiveResolvers.map(_.name).mkString(", ")}; ivyLocal=${ivyLocalCanonical.getPath}")
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Effective resolvers: ${effectiveResolvers.map(_.name).mkString(", ")}; ivyLocal=${ivyLocalCanonical.getPath}"
+    }
     val coursierDeps = depends.flatMap(expandSbtPluginDependency).map(toCoursierDependency)
     val (resolvedArtifacts, errors) = getAllDependencies(coursierDeps)
-    logger.info(s"[SBTIX_DEBUG] Total resolved artifacts: ${resolvedArtifacts.size}")
-    resolvedArtifacts.foreach { case (_, artifact) =>
-      if (artifact.url.startsWith("file:")) {
-        logger.info(s"[SBTIX_DEBUG] Resolved local artifact ${artifact.url}")
-      } else {
-        logger.info(s"[SBTIX_DEBUG] Resolved artifact ${artifact.url}")
+    SbtixDebug.info(logger)(s"[SBTIX_DEBUG] Total resolved artifacts: ${resolvedArtifacts.size}")
+    if (SbtixDebug.enabled) {
+      resolvedArtifacts.foreach { case (_, artifact) =>
+        if (artifact.url.startsWith("file:")) {
+          logger.info(s"[SBTIX_DEBUG] Resolved local artifact ${artifact.url}")
+        } else {
+          logger.info(s"[SBTIX_DEBUG] Resolved artifact ${artifact.url}")
+        }
       }
     }
     val cleanedErrors = filterLocalResolutionErrors(errors)
-    logger.info(s"[SBTIX_DEBUG] Resolution errors before filtering: ${errors.errors.size}, after: ${cleanedErrors.errors.size}")
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Resolution errors before filtering: ${errors.errors.size}, after: ${cleanedErrors.errors.size}"
+    }
 
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
@@ -133,13 +139,19 @@ class CoursierArtifactFetcher(
       resolvedArtifacts.foldLeft((Set.empty[NixArtifact], Set.empty[ProvidedArtifact])) {
         case ((lockedAcc, providedAcc), (dependency, artifact)) =>
           if (dependency.module.organization.value.contains("sbtix-test-multibuild")) {
-            logger.info(s"[SBTIX_DEBUG] Evaluating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} from ${artifact.url}")
+            SbtixDebug.info(logger) {
+              s"[SBTIX_DEBUG] Evaluating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} from ${artifact.url}"
+            }
           }
           if (artifact.url.startsWith("file:") && artifact.url.contains("sbtix-test-multibuild")) {
-            logger.info(s"[SBTIX_DEBUG] Local candidate ${artifact.url} -> ${isLocalIvyUrl(artifact.url)}")
+            SbtixDebug.info(logger) {
+              s"[SBTIX_DEBUG] Local candidate ${artifact.url} -> ${isLocalIvyUrl(artifact.url)}"
+            }
           }
           if (isLocalIvyUrl(artifact.url)) {
-            logger.info(s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}")
+            SbtixDebug.info(logger) {
+              s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}"
+            }
             (lockedAcc, providedAcc + ProvidedArtifact.from(dependency, artifact.url))
           } else {
             val expanded = fetchAndExpand(artifact, repoDescriptors, dependency)
@@ -159,7 +171,9 @@ class CoursierArtifactFetcher(
       }
 
     val sanitizedArtifacts = lockedArtifacts ++ metaArtifacts
-    logger.info(s"[SBTIX_DEBUG] Locked artifacts: ${lockedArtifacts.size}, meta: ${metaArtifacts.size}, provided: ${providedArtifacts.size}")
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Locked artifacts: ${lockedArtifacts.size}, meta: ${metaArtifacts.size}, provided: ${providedArtifacts.size}"
+    }
 
     (nixRepos, sanitizedArtifacts, providedArtifacts, Set(cleanedErrors))
   }
@@ -727,17 +741,23 @@ class CoursierArtifactFetcher(
         val canonicalPath = canonical.getPath
         val result = canonicalPath.startsWith(basePath)
         if (!result) {
-          logger.info(s"[SBTIX_DEBUG] Local Ivy check mismatch: candidate=$canonicalPath base=$basePath for url=$url")
+          SbtixDebug.info(logger) {
+            s"[SBTIX_DEBUG] Local Ivy check mismatch: candidate=$canonicalPath base=$basePath for url=$url"
+          }
         } else {
-          logger.info(s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path $canonicalPath")
+          SbtixDebug.info(logger) {
+            s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path $canonicalPath"
+          }
         }
         if (result) {
-          logger.info(s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path ${canonical.getPath}")
+          SbtixDebug.info(logger) {
+            s"[SBTIX_DEBUG] Classified local Ivy artifact via canonical path ${canonical.getPath}"
+          }
         }
         result
       } catch {
         case e: Exception =>
-          logger.warn(s"[SBTIX_DEBUG] Failed to inspect local Ivy URL $url: ${e.getMessage}")
+          SbtixDebug.warn(logger)(s"[SBTIX_DEBUG] Failed to inspect local Ivy URL $url: ${e.getMessage}")
           false
       }
     }
@@ -755,13 +775,17 @@ class CoursierArtifactFetcher(
     val (skipped, kept) = errors.errors.partition { case ((module, version), _) =>
       val moduleDir = new File(ivyLocalDir, s"${module.organization.value}/${module.name.value}/$version")
       val exists = moduleDir.exists()
-      logger.info(s"[SBTIX_DEBUG] Checking Ivy local for ${module.organization.value}:${module.name.value}:$version at ${moduleDir.getAbsolutePath} -> ${if (exists) "found" else "missing"}")
+      SbtixDebug.info(logger) {
+        s"[SBTIX_DEBUG] Checking Ivy local for ${module.organization.value}:${module.name.value}:$version at ${moduleDir.getAbsolutePath} -> ${if (exists) "found" else "missing"}"
+      }
       exists
     }
 
     if (skipped.nonEmpty) {
       val modules = skipped.map { case ((module, version), _) => s"${module.organization.value}:${module.name.value}:$version" }
-      logger.info(s"[SBTIX_DEBUG] Treating ${modules.mkString(", ")} as provided by sbtix-build-inputs (found in Ivy local).")
+      SbtixDebug.info(logger) {
+        s"[SBTIX_DEBUG] Treating ${modules.mkString(", ")} as provided by sbtix-build-inputs (found in Ivy local)."
+      }
     }
 
     ResolutionErrors(kept)

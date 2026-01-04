@@ -323,9 +323,15 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     provided: Set[ProvidedArtifact]
   ): Unit = {
     if (provided.nonEmpty) {
-      log.info(s"[SBTIX_DEBUG] Treating ${provided.size} artifacts as provided by sbtix-build-inputs during $context:")
-      provided.toSeq.sortBy(_.coordinates).foreach { artifact =>
-        log.info(s"  - ${artifact.coordinates} -> ${artifact.localPath}")
+      if (SbtixDebug.enabled) {
+        log.info(s"[SBTIX_DEBUG] Treating ${provided.size} artifacts as provided by sbtix-build-inputs during $context:")
+        provided.toSeq.sortBy(_.coordinates).foreach { artifact =>
+          log.info(s"  - ${artifact.coordinates} -> ${artifact.localPath}")
+        }
+      } else {
+        log.info(
+          s"sbtix: treating ${provided.size} artifacts as provided by sbtix-build-inputs during $context (set SBTIX_DEBUG=1 for details)"
+        )
       }
     }
   }
@@ -352,12 +358,18 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   ): Unit = {
     val flattened = allErrors.toSeq.flatMap(_.errors)
     if (flattened.nonEmpty) {
-      log.warn(s"[SBTIX_DEBUG] Resolution issues encountered during $context:")
-      flattened.foreach { case ((module, version), messages) =>
-        val org    = module.organization.value
-        val name   = module.name.value
-        val details = if (messages.nonEmpty) messages.mkString(", ") else "unknown error"
-        log.warn(s"  - $org:$name:$version -> $details")
+      if (SbtixDebug.enabled) {
+        log.warn(s"[SBTIX_DEBUG] Resolution issues encountered during $context:")
+        flattened.foreach { case ((module, version), messages) =>
+          val org    = module.organization.value
+          val name   = module.name.value
+          val details = if (messages.nonEmpty) messages.mkString(", ") else "unknown error"
+          log.warn(s"  - $org:$name:$version -> $details")
+        }
+      } else {
+        log.warn(
+          s"sbtix: encountered ${flattened.size} resolution issues during $context (set SBTIX_DEBUG=1 for details)"
+        )
       }
     }
   }
@@ -415,13 +427,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val pluginFiles = collect(baseDir, Nil)
     pluginFiles.headOption
       .map { pluginsFile =>
-        log.info(s"[SBTIX_DEBUG] Using plugins.sbt at ${pluginsFile.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using plugins.sbt at ${pluginsFile.getAbsolutePath}" }
         pluginFiles.tail match {
           case Nil => ()
           case rest =>
-            log.info(
+            SbtixDebug.info(log) {
               s"[SBTIX_DEBUG] Ignoring additional plugins.sbt candidates: ${rest.map(_.getAbsolutePath).mkString(", ")}"
-            )
+            }
         }
         IO.read(pluginsFile)
           .split("\n")
@@ -447,7 +459,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           .toSet
       }
       .getOrElse {
-        log.info(s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}" }
         Set.empty
     }
   }
@@ -515,7 +527,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val sbtToolingDeps: Set[Dependency] =
         if (scalaVer.startsWith("3.")) {
           val bridge = ModuleID("org.scala-lang", "scala3-sbt-bridge", scalaVer)
-          log.info(s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala 3 builds: ${bridge.organization}:${bridge.name}:${bridge.revision}")
+          SbtixDebug.info(log) {
+            s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala 3 builds: ${bridge.organization}:${bridge.name}:${bridge.revision}"
+          }
           Set(Dependency(bridge))
         } else Set.empty
 
@@ -546,7 +560,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         val pluginScalaBinary = CrossVersion.binaryScalaVersion(pluginScalaFullVersion)
         val pluginModuleIds =
           declaredPlugins((LocalRootProject / baseDirectory).value, pluginScalaBinary, sbtBinaryVersion.value, log)
-        log.info(s"[SBTIX_DEBUG] Parsed ${pluginModuleIds.size} sbt plugins from project/plugins.sbt")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG] Parsed ${pluginModuleIds.size} sbt plugins from project/plugins.sbt" }
         if (pluginModuleIds.nonEmpty) {
           val pluginResolvers =
             pluginData.resolvers.map(_.toSet).getOrElse(Set.empty[Resolver])
@@ -566,14 +580,14 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
               )(Patterns(mavenPattern))
             )
           }
-          log.info(s"[SBTIX_DEBUG] Plugin classpath contains ${pluginModuleIds.size} plugin modules")
-          log.info(
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Plugin classpath contains ${pluginModuleIds.size} plugin modules" }
+          SbtixDebug.info(log) {
             pluginModuleIds
               .toSeq
               .sortBy(m => s"${m.organization}:${m.name}")
               .map(m => s"${m.organization}:${m.name}:${m.revision}")
               .mkString("[SBTIX_DEBUG] Plugin modules => ", ", ", "")
-          )
+          }
           val pluginFetcher = new CoursierArtifactFetcher(
             log,
             pluginResolvers ++ projectResolvers ++ defaultPluginResolvers,
@@ -608,10 +622,10 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Copy the expected file for repo.nix if it exists
       findExpectedFile(currentBase, repoCandidateOrder) match {
         case Some(expectedRepoFile) =>
-          log.info(s"[SBTIX_DEBUG] Using expected repo.nix from ${expectedRepoFile.getAbsolutePath}")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected repo.nix from ${expectedRepoFile.getAbsolutePath}" }
           IO.copyFile(expectedRepoFile, repoFile)
         case None =>
-          log.info(s"[SBTIX_DEBUG] Expected repo.nix not found for ${baseDirectory.value}, generating file")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Expected repo.nix not found for ${baseDirectory.value}, generating file" }
           IO.write(repoFile, NixWriter2(repos, artifacts, scalaVer, sbtVer))
       }
       log.info(s"Wrote repository definitions to ${repoFile}")
@@ -624,15 +638,17 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Copy the expected file for testing
       findExpectedFile(baseDirectory.value, Seq("project-repo.nix")) match {
         case Some(expectedProjectRepoFile) =>
-          log.info(s"[SBTIX_DEBUG] Using expected project-repo.nix from ${expectedProjectRepoFile.getAbsolutePath}")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected project-repo.nix from ${expectedProjectRepoFile.getAbsolutePath}" }
           IO.copyFile(expectedProjectRepoFile, projectRepoFile)
         case None =>
           pluginFetchResult match {
             case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
-              log.info(s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts")
+              SbtixDebug.info(log) {
+                s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts"
+              }
               IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
             case _ =>
-              log.info(s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo")
+              SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo" }
           IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
           }
       }
@@ -675,19 +691,21 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
 
       val currentProjectBaseDir = genNixProjectDir.value // Base dir of the current sub-project in the test
       val buildRootDir = (LocalRootProject / baseDirectory).value
-      log.info(s"[SBTIX_DEBUG genComposition] Current project base dir: ${currentProjectBaseDir.getAbsolutePath}")
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Current project base dir: ${currentProjectBaseDir.getAbsolutePath}" }
 
       // Debug: List files in current project base directory
       try {
         val filesInCurrentDir = IO.listFiles(currentProjectBaseDir).map(_.getName).mkString(", ")
-        log.info(s"[SBTIX_DEBUG genComposition] Files in ${currentProjectBaseDir.getAbsolutePath}: [${filesInCurrentDir}]")
-      } catch { case e: Exception => log.warn(s"[SBTIX_DEBUG genComposition] Error listing files: ${e.getMessage}") }
+        SbtixDebug.info(log) {
+          s"[SBTIX_DEBUG genComposition] Files in ${currentProjectBaseDir.getAbsolutePath}: [${filesInCurrentDir}]"
+        }
+      } catch { case e: Exception => SbtixDebug.warn(log)(s"[SBTIX_DEBUG genComposition] Error listing files: ${e.getMessage}") }
 
       val pluginJarEnv = sys.env.get("SBTIX_PLUGIN_JAR_PATH").filter(_.nonEmpty)
       val pluginJarProp = sys.props.get("sbtix.pluginJarPath").filter(_.nonEmpty)
       val pluginJarObserved = pluginJarEnv.orElse(pluginJarProp)
-      log.info(s"[SBTIX_DEBUG genComposition] SBTIX_PLUGIN_JAR_PATH env: ${pluginJarEnv.getOrElse("<unset>")}")
-      log.info(s"[SBTIX_DEBUG genComposition] sbtix.pluginJarPath prop: ${pluginJarProp.getOrElse("<unset>")}")
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] SBTIX_PLUGIN_JAR_PATH env: ${pluginJarEnv.getOrElse("<unset>")}" }
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] sbtix.pluginJarPath prop: ${pluginJarProp.getOrElse("<unset>")}" }
       if (pluginJarObserved.isEmpty) {
         sys.error("sbtix: plugin jar path missing; ensure sbtix wrapper sets SBTIX_PLUGIN_JAR_PATH/sbtix.pluginJarPath")
       }
@@ -700,7 +718,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
             sys.error(s"sbtix: unable to determine sbtix plugin version from jar path: ${pluginJarObserved.getOrElse("<unset>")}")
           }
       val bootstrapTimestamp = DefaultPublicationTimestamp
-      log.info(s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix.")
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Using plugin version ${currentPluginVersion} for local Ivy setup in Nix." }
 
       // The sbtix plugin itself is an sbt plugin (loaded by the sbt launcher), so it must be
       // staged under the sbt-launcher Scala binary version (not the user's project Scala).
@@ -710,7 +728,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val sbtScalaFullVersion = appConfiguration.value.provider.scalaProvider.version
       val pluginScalaBinary = CrossVersion.binaryScalaVersion(sbtScalaFullVersion)
       val pluginSbtBinary = sbtBinaryVersion.value
-      log.info(s"[SBTIX_DEBUG genComposition] sbt launcher Scala binary=${pluginScalaBinary}, sbt binary=${pluginSbtBinary}")
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] sbt launcher Scala binary=${pluginScalaBinary}, sbt binary=${pluginSbtBinary}" }
       
       val rawNixContent = sbtixNixContentTemplate.value(
         currentPluginVersion,
@@ -731,7 +749,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val templatedNixContent =
         rawNixContent.replace("{{PROJECT_NAME}}", currentProjectBaseDir.getName)
       if (usesStoreBootstrap)
-        log.info("[SBTIX_DEBUG genComposition] Store-backed plugin bootstrap detected; no workspace jar required.")
+        SbtixDebug.info(log) { "[SBTIX_DEBUG genComposition] Store-backed plugin bootstrap detected; no workspace jar required." }
       else
         sys.error("sbtix: store-backed plugin bootstrap missing; set SBTIX_SOURCE_URL/REV/NAR_HASH, SBTIX_SOURCE_PATH, or SBTIX_PLUGIN_JAR_PATH")
 
@@ -778,21 +796,21 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Write generated nix
       val generatedNixFile = new File(genNixProjectDir.value, GeneratedNixFileName)
       IO.write(generatedNixFile, templatedNixContent)
-      log.info(s"[SBTIX_DEBUG genComposition] Wrote sbtix-generated file to ${generatedNixFile.getAbsolutePath}")
+      SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Wrote sbtix-generated file to ${generatedNixFile.getAbsolutePath}" }
 
       val expectedDir = new File(currentProjectBaseDir, "expected")
       val expectedDefaultNix = new File(expectedDir, "default.nix")
       val defaultNixFile = new File(genNixProjectDir.value, "default.nix")
       
       if (expectedDefaultNix.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Using expected default.nix from ${expectedDefaultNix.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Using expected default.nix from ${expectedDefaultNix.getAbsolutePath}" }
         IO.copyFile(expectedDefaultNix, defaultNixFile)
       } else if (!defaultNixFile.exists()) {
         val defaultContent = sampleDefaultTemplate.replace("{{GENERATED_FILE}}", GeneratedNixFileName)
         IO.write(defaultNixFile, defaultContent)
-        log.info(s"[SBTIX_DEBUG genComposition] Generated example default.nix at ${defaultNixFile.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Generated example default.nix at ${defaultNixFile.getAbsolutePath}" }
       } else {
-        log.info(s"[SBTIX_DEBUG genComposition] default.nix already exists; leaving it untouched")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] default.nix already exists; leaving it untouched" }
       }
 
       // Ensure sbtix.nix is present (copy from expected file or packaged template)
@@ -819,21 +837,21 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
 
       try {
         if (expectedSbtixNix.exists()) {
-          log.info(s"[SBTIX_DEBUG genComposition] Using expected sbtix.nix from ${expectedSbtixNix.getAbsolutePath}")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Using expected sbtix.nix from ${expectedSbtixNix.getAbsolutePath}" }
           IO.copyFile(expectedSbtixNix, targetSbtixNix)
         } else if (packagedSbtixNix.nonEmpty) {
           val src = packagedSbtixNix.get
-          log.info(s"[SBTIX_DEBUG genComposition] Copying packaged sbtix.nix from ${src.getAbsolutePath}")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying packaged sbtix.nix from ${src.getAbsolutePath}" }
           IO.copyFile(src, targetSbtixNix)
         } else {
           val resourceCandidates = Seq("templates/sbtix.nix", "nix-exprs/sbtix.nix", "sbtix.nix")
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
-              log.info(s"[SBTIX_DEBUG genComposition] Extracting sbtix.nix ($name) from plugin resources")
+              SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Extracting sbtix.nix ($name) from plugin resources" }
               IO.write(targetSbtixNix, content)
             case None =>
               val searched = (packagedSbtixCandidates.map(_.getAbsolutePath) ++ resourceCandidates).mkString(", ")
-              log.warn(s"[SBTIX_DEBUG genComposition] Unable to locate sbtix.nix template. Looked in: $searched")
+              SbtixDebug.warn(log) { s"[SBTIX_DEBUG genComposition] Unable to locate sbtix.nix template. Looked in: $searched" }
           }
         }
       } catch {
@@ -846,7 +864,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         val raw = IO.read(targetSbtixNix)
         val rendered = renderSbtixTemplate(raw, currentPluginVersion, bootstrapTimestamp, pluginScalaBinary, pluginSbtBinary)
         if (raw != rendered) {
-          log.info(s"[SBTIX_DEBUG genComposition] Rendered sbtix.nix template for plugin version $currentPluginVersion")
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Rendered sbtix.nix template for plugin version $currentPluginVersion" }
           IO.write(targetSbtixNix, rendered)
         }
 
@@ -859,14 +877,14 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           val resourceCandidates = Seq("templates/sbtix.nix", "nix-exprs/sbtix.nix")
           loadTemplateResource(resourceCandidates) match {
             case Some((content, name)) =>
-              log.warn(s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name")
+              SbtixDebug.warn(log) { s"[SBTIX_DEBUG genComposition] Detected outdated sbtix.nix, refreshing from $name" }
               val updated = renderSbtixTemplate(content, currentPluginVersion, bootstrapTimestamp, pluginScalaBinary, pluginSbtBinary)
               IO.write(targetSbtixNix, updated)
             case None =>
-              log.warn("[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file")
+              SbtixDebug.warn(log) { "[SBTIX_DEBUG genComposition] Unable to refresh sbtix.nix with modern template; proceeding with existing file" }
           }
         } else {
-          log.info("[SBTIX_DEBUG genComposition] sbtix.nix already contains modern local-repo wiring")
+          SbtixDebug.info(log) { "[SBTIX_DEBUG genComposition] sbtix.nix already contains modern local-repo wiring" }
         }
       }
 
@@ -884,7 +902,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         }.headOption
         streamOpt match {
           case Some((stream, name)) =>
-            log.info(s"[SBTIX_DEBUG genComposition] Extracting $resourceName ($name) from plugin resources")
+            SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Extracting $resourceName ($name) from plugin resources" }
             val source = scala.io.Source.fromInputStream(stream)
             try {
               IO.write(target, source.mkString)
@@ -896,20 +914,24 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
           case None => false
         }
       }
-      log.info(s"[SBTIX_DEBUG genComposition] manual-repo target ${manualRepoTarget.getAbsolutePath} exists=${manualRepoTarget.exists()} isFile=${manualRepoTarget.isFile} canRead=${manualRepoTarget.canRead}")
+      SbtixDebug.info(log) {
+        s"[SBTIX_DEBUG genComposition] manual-repo target ${manualRepoTarget.getAbsolutePath} exists=${manualRepoTarget.exists()} isFile=${manualRepoTarget.isFile} canRead=${manualRepoTarget.canRead}"
+      }
       if (manualRepoTarget.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] manual-repo.nix already exists at ${manualRepoTarget.getAbsolutePath}, leaving it untouched")
+        SbtixDebug.info(log) {
+          s"[SBTIX_DEBUG genComposition] manual-repo.nix already exists at ${manualRepoTarget.getAbsolutePath}, leaving it untouched"
+        }
       } else if (expectedManualRepo.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Copying expected manual-repo.nix from ${expectedManualRepo.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying expected manual-repo.nix from ${expectedManualRepo.getAbsolutePath}" }
         IO.copyFile(expectedManualRepo, manualRepoTarget)
       } else if (packagedManualRepo.nonEmpty) {
         val src = packagedManualRepo.get
-        log.info(s"[SBTIX_DEBUG genComposition] Copying packaged manual-repo.nix from ${src.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying packaged manual-repo.nix from ${src.getAbsolutePath}" }
         IO.copyFile(src, manualRepoTarget)
       } else if (copyResource("manual-repo.nix", manualRepoTarget)) {
-        log.info("[SBTIX_DEBUG genComposition] Extracted manual-repo.nix from plugin resources")
+        SbtixDebug.info(log) { "[SBTIX_DEBUG genComposition] Extracted manual-repo.nix from plugin resources" }
       } else {
-        log.warn("[SBTIX_DEBUG genComposition] Falling back to empty manual-repo.nix")
+        SbtixDebug.warn(log) { "[SBTIX_DEBUG genComposition] Falling back to empty manual-repo.nix" }
         IO.write(manualRepoTarget, "[]")
       }
       
@@ -921,21 +943,25 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         new File(buildRootDir, "plugin/nix-exprs/sbtix-plugin-repo.nix")
       ).find(_.exists())
       if (expectedPluginRepo.exists()) {
-        log.info(s"[SBTIX_DEBUG genComposition] Copying expected sbtix-plugin-repo.nix from ${expectedPluginRepo.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying expected sbtix-plugin-repo.nix from ${expectedPluginRepo.getAbsolutePath}" }
         IO.copyFile(expectedPluginRepo, pluginRepoTarget)
       } else if (packagedPluginRepo.nonEmpty) {
         val src = packagedPluginRepo.get
-        log.info(s"[SBTIX_DEBUG genComposition] Copying packaged sbtix-plugin-repo.nix from ${src.getAbsolutePath}")
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying packaged sbtix-plugin-repo.nix from ${src.getAbsolutePath}" }
         IO.copyFile(src, pluginRepoTarget)
       } else if (copyResource("sbtix-plugin-repo.nix", pluginRepoTarget)) {
-        log.info("[SBTIX_DEBUG genComposition] Extracted sbtix-plugin-repo.nix from plugin resources")
+        SbtixDebug.info(log) { "[SBTIX_DEBUG genComposition] Extracted sbtix-plugin-repo.nix from plugin resources" }
       } else {
         val repoFallback = new File(buildRootDir, "repo.nix")
         if (repoFallback.exists()) {
-          log.warn(s"[SBTIX_DEBUG genComposition] Plugin template missing sbtix-plugin-repo.nix; copying fallback from ${repoFallback.getAbsolutePath}")
+          SbtixDebug.warn(log) {
+            s"[SBTIX_DEBUG genComposition] Plugin template missing sbtix-plugin-repo.nix; copying fallback from ${repoFallback.getAbsolutePath}"
+          }
           IO.copyFile(repoFallback, pluginRepoTarget)
         } else if (!pluginRepoTarget.exists()) {
-          log.warn("[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access.")
+          SbtixDebug.warn(log) {
+            "[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access."
+          }
         }
       }
       

@@ -52,7 +52,9 @@ object NixPlugin extends AutoPlugin {
             case f: Attributed[File] => f.get(Keys.moduleID.key).map(Dependency(_))
         }
         .toSet
-        state.log.info(s"[SBTIX_DEBUG] Managed deps for genNixProject: ${managedDependencies.size}")
+        SbtixDebug.info(state.log) {
+          s"[SBTIX_DEBUG] Managed deps for genNixProject: ${managedDependencies.size}"
+        }
       val scalaVer = scalaVersion.value
       val sbtVer = sbtVersion.value
 

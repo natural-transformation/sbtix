@@ -74,20 +74,19 @@ let
     #!${runtimeShell}
 
     ${sbtixScript}/bin/sbtix genNix
-    ${sbtixScript}/bin/sbtix genComposition
   '';
 
   sbtixGenallScript = writeScriptBin "sbtix-gen-all" ''
     #!${runtimeShell}
 
-    ${sbtixScript}/bin/sbtix genNix "reload plugins" genNix
-    ${sbtixScript}/bin/sbtix genComposition
+    # Kept for backwards compatibility. Prefer `sbtix-gen-all2` for the full
+    # flow including `sbtix-generated.nix`.
+    ${sbtixScript}/bin/sbtix genNix
   '';
 
   sbtixGenall2Script = writeScriptBin "sbtix-gen-all2" ''
     #!${runtimeShell}
 
-    ${sbtixScript}/bin/sbtix genNix "reload plugins" genNix "reload plugins" genNix
     ${sbtixScript}/bin/sbtix genComposition
   '';
 
