@@ -1,6 +1,6 @@
 # Sbtix
 
-[Build status (Hercules CI)](https://hercules-ci.com/github/natural-transformation/sbtix)
+[![CI](https://github.com/natural-transformation/sbtix/actions/workflows/ci.yml/badge.svg)](https://github.com/natural-transformation/sbtix/actions/workflows/ci.yml)
 
 ## What?
 

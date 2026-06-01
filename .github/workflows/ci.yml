@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    name: Plugin tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run unit tests
+        run: nix develop . --command bash -lc 'cd plugin && sbt test'
+
+      - name: Run scripted diagnostics test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/library-diagnostic"'
+
+      - name: Run scripted simple test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/simple"'
+
+      - name: Run scripted private auth test
+        run: |
+          nix develop . --command bash -lc '
+            python3 serve-authenticated.py &
+            server=$!
+            sleep 1
+            if ! kill -0 "$server" 2>/dev/null; then
+              echo "auth server failed to start" >&2
+              wait "$server"
+              exit 1
+            fi
+            trap "kill $server 2>/dev/null || true" EXIT INT TERM
+            cd plugin
+            sbt "scripted sbtix/private-auth"
+          '
+
+  nix:
+    name: Nix build and integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Parse Nix templates
+        run: nix-instantiate --parse plugin/nix-exprs/sbtix.nix
+
+      - name: Build sbtix
+        run: nix build .#sbtix -L
+
+      - name: Run integration tests
+        run: |
+          nix develop . --command bash -lc '
+            set -euo pipefail
+            export PATH="$PWD/result/bin:$PATH"
+            ./tests/multi-build/run.sh
+            ./tests/template-generation/run.sh
+          '
