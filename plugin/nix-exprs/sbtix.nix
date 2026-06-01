@@ -381,7 +381,13 @@ in rec {
             chmod -R u+w ./.sbt-boot || true
           fi
           export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
-          HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage
+          if ! HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage; then
+            echo "error: buildSbtProgram could not run sbt stage." 1>&2
+            echo "expected: sbt stage creates target/universal/stage, usually via sbt-native-packager." 1>&2
+            echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
+            echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
+            exit 1
+          fi
           mkdir -p $out/
           copied_any=0
           copy_stage_root() {
@@ -401,7 +407,10 @@ in rec {
           done < <(find . -path '*/target/universal/stage' -type d)
 
           if [ $copied_any -eq 0 ]; then
-            echo "error: no staged artifacts found. Ensure sbt-native-packager is enabled or override sbtix.buildSbtProgram." 1>&2
+            echo "error: buildSbtProgram did not find staged application output." 1>&2
+            echo "expected: sbt stage creates target/universal/stage, usually via sbt-native-packager." 1>&2
+            echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
+            echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
             exit 1
           fi
           for p in $(find $out/bin/* -executable); do

@@ -1,0 +1,5 @@
+# Verify that buildSbtProgram gives an actionable error for library-style projects.
+> genComposition
+$ exists default.nix
+$ exists sbtix.nix
+$ exec sh -c 'rm -rf result nix-build.log; if nix-build > nix-build.log 2>&1; then cat nix-build.log; exit 1; fi; grep -q "error: buildSbtProgram could not run sbt stage." nix-build.log && grep -q "if this project is a library, use sbtix.buildSbtLibrary instead." nix-build.log && grep -q "for custom layouts, use sbtix.buildSbtProject with an installPhase." nix-build.log || { cat nix-build.log; exit 1; }'
