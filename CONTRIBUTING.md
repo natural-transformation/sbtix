@@ -46,7 +46,7 @@ Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, `plugin/
 The `tests` directory contains the integration suites that validate multi-project builds and template generation. Run them from the repository root after entering the shared nix shell:
 
 ```console
-nix develop             # loads sbt + CI tooling (hci, nix, etc.) for this repository
+nix develop             # loads sbt + nix for this repository
 nix build '.#sbtix'     # produces ./result/bin/sbtix for the test scripts
 export PATH="$PWD/result/bin:$PATH"
 ./tests/multi-build/run.sh
@@ -55,17 +55,15 @@ export PATH="$PWD/result/bin:$PATH"
 
 Whenever the template or bootstrap snippet changes, rerun the commands above and copy the regenerated `sbtix-generated.nix` (and the example `default.nix` if you removed it) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
 
-#### CI preview
+#### CI
 
-The integration tests aren't Nix builds because they require network access and build access to the Nix store.
-To run the tests in a CI-like environment, run for example:
+GitHub Actions runs the plugin tests, Nix build, and integration tests on
+x86_64 and aarch64 Linux runners. The workflow lives in
+`.github/workflows/ci.yml`.
 
-```bash
-hci effect run --no-token --as-branch master default.effects.tests.multi-build
-hci effect run --no-token --as-branch master default.effects.tests.template-generation
-```
-
-You can find the tests through tab completion.
+The integration tests aren't pure flake checks because they require network
+access and build access to the Nix store, so they are executed as workflow
+steps after building `.#sbtix`.
 
 ### Local sbtix checkouts (optional)
 
