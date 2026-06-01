@@ -57,8 +57,9 @@ Whenever the template or bootstrap snippet changes, rerun the commands above and
 
 #### CI
 
-GitHub Actions runs the plugin tests, Nix build, and integration tests on an
-x86_64 Linux runner. The workflow lives in `.github/workflows/ci.yml`.
+GitHub Actions runs the plugin tests, Nix build, and integration tests on
+x86_64 and aarch64 Linux runners. The workflow lives in
+`.github/workflows/ci.yml`.
 
 The integration tests aren't pure flake checks because they require network
 access and build access to the Nix store, so they are executed as workflow

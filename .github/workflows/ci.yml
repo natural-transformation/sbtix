@@ -16,8 +16,14 @@ concurrency:
 
 jobs:
   plugin:
-    name: Plugin tests
-    runs-on: ubuntu-24.04
+    name: Plugin tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
@@ -52,8 +58,14 @@ jobs:
           '
 
   nix:
-    name: Nix build and integration
-    runs-on: ubuntu-24.04
+    name: Nix build and integration (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
