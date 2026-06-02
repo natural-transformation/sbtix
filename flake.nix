@@ -5,34 +5,35 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = inputs@{ flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
+  outputs = { self, nixpkgs }:
+    let
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
-      perSystem = { pkgs, ... }:
+      forAllSystems = nixpkgs.lib.genAttrs systems;
+    in {
+      packages = forAllSystems (system:
         let
-          selfSourceInfo = inputs.self.sourceInfo or {};
+          pkgs = import nixpkgs { inherit system; };
+          selfSourceInfo = self.sourceInfo or {};
           sbtixPackage = pkgs.callPackage ./sbtix-tool.nix {
             inherit selfSourceInfo;
           };
         in {
-          packages = {
-            sbtix = sbtixPackage;
-            default = sbtixPackage;
-          };
+          sbtix = sbtixPackage;
+          default = sbtixPackage;
+        });
 
-          devShells.default = pkgs.mkShell {
+      devShells = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in {
+          default = pkgs.mkShell {
             nativeBuildInputs = [
               pkgs.nix
               pkgs.sbt
             ];
             # TODO: Don't rely on NIX_PATH in tests.
-            NIX_PATH = "nixpkgs=${inputs.nixpkgs}";
+            NIX_PATH = "nixpkgs=${nixpkgs}";
           };
-        };
-      flake = {
-        # The usual flake attributes can be defined here, including system-
-        # agnostic ones like nixosModule and system-enumerating ones, although
-        # those are more easily expressed in perSystem.
-      };
+        });
     };
 }
