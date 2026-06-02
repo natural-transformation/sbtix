@@ -15,7 +15,7 @@ import scala.util.control.NonFatal
 import scala.util.Try
 
 import sbt.{uri, Credentials, Logger, ModuleID, Resolver}
-import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, PatternsBasedRepository, URLRepository}
+import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, PatternsBasedRepository, URLRepository, UpdateReport}
 
 import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
 import coursier.core.{Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
@@ -177,6 +177,28 @@ class CoursierArtifactFetcher(
     }
 
     (nixRepos, sanitizedArtifacts, providedArtifacts, Set(cleanedErrors))
+  }
+
+  def fromUpdateReport(report: UpdateReport): (Set[NixRepo], Set[NixArtifact]) = {
+    val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
+    val nixRepos = repoDescriptors.map(_.repo).toSet
+    val artifacts =
+      report.configurations
+        .flatMap(_.modules)
+        .filterNot(_.evicted)
+        .flatMap { moduleReport =>
+          moduleReport.artifacts.flatMap { case (artifact, file) =>
+            artifact.url.toSeq.flatMap { url =>
+              lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
+            }
+          }
+        }
+        .toSet
+
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} artifacts from already-resolved sbt plugin update report"
+    }
+    (nixRepos, artifacts)
   }
 
   private def toCoursierDependency(dep: SbtixDependency): CDependency = {
@@ -677,6 +699,96 @@ class CoursierArtifactFetcher(
 
     base ++ pomExtras
   }
+
+  private def lockReportArtifact(
+      url: String,
+      file: File,
+      module: ModuleID,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[NixArtifact] = {
+    if (url.startsWith("file:") && isLocalIvyUrl(url)) Set.empty
+    else {
+      val base = lockCachedArtifact(url, file, repoDescriptors)
+      val pom =
+        if (url.endsWith(".pom")) Set.empty[NixArtifact]
+        else cachedMavenPom(module, url, repoDescriptors).flatMap { case (pomUrl, pomFile) =>
+          lockCachedArtifact(pomUrl, pomFile, repoDescriptors) ++ collectCachedPomAncestors(pomFile, repoDescriptors)
+        }
+      base ++ pom
+    }
+  }
+
+  private def lockCachedArtifact(
+      url: String,
+      file: File,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[NixArtifact] = {
+    val descriptor = descriptorForUrl(url, repoDescriptors)
+    val relative = computeRelativePath(url, descriptor)
+    val sha256 = computeSha256(file)
+    expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
+  }
+
+  private def cachedMavenPom(
+      module: ModuleID,
+      artifactUrl: String,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] = {
+    val descriptor = descriptorForUrl(artifactUrl, repoDescriptors)
+    val modulePath =
+      s"${module.organization.replace('.', '/')}/${module.name}/${module.revision}/${module.name}-${module.revision}.pom"
+    val moduleUrl = descriptor.normalizedRoot + modulePath
+    val artifactUrlPom = pomUrlFromArtifactUrl(module, artifactUrl)
+
+    (Set(moduleUrl) ++ artifactUrlPom.toSet)
+      .flatMap(url => cachedFileForUrl(url).filter(_.isFile).map(file => (url, file)))
+  }
+
+  private def pomUrlFromArtifactUrl(module: ModuleID, artifactUrl: String): Option[String] = {
+    val slash = artifactUrl.lastIndexOf('/')
+    if (slash < 0) None
+    else {
+      val dir = artifactUrl.substring(0, slash + 1)
+      val file = artifactUrl.substring(slash + 1)
+      val withoutExtension = file.replaceFirst("\\.[^.]+$", "")
+      val versionMarker = s"-${module.revision}"
+      val versionStart = withoutExtension.indexOf(versionMarker)
+      if (versionStart < 0) None
+      else Some(dir + withoutExtension.substring(0, versionStart) + versionMarker + ".pom")
+    }
+  }
+
+  private def collectCachedPomAncestors(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String] = Set.empty
+  ): Set[NixArtifact] = {
+    val pom = PomModel.parse(pomFile)
+    val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
+    val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
+    candidates.flatMap { pomDep =>
+      val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
+      val path =
+        s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension"
+      val url = descriptor.normalizedRoot + path
+      if (seen(url)) Set.empty[NixArtifact]
+      else {
+        cachedFileForUrl(url).filter(_.isFile).map { file =>
+          lockCachedArtifact(url, file, repoDescriptors) ++
+            (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url) else Set.empty)
+        }.getOrElse(Set.empty)
+      }
+    }.toSet
+  }
+
+  private def cachedFileForUrl(url: String): Option[File] =
+    Try(new URI(url)).toOption.flatMap { uri =>
+      Option(uri.getScheme).filter(s => s == "http" || s == "https").flatMap { scheme =>
+        Option(uri.getHost).map { host =>
+          new File(new File(new File(CacheDefaults.location, scheme), host), uri.getRawPath.stripPrefix("/"))
+        }
+      }
+    }
 
   /** Parse a POM and lock any parent POM and imported BOMs (scope=import, type=pom). */
   private def collectPomAncestors(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor]): Set[NixArtifact] = {
