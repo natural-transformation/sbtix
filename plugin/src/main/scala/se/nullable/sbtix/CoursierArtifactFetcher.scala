@@ -95,7 +95,8 @@ class CoursierArtifactFetcher(
   credentials: Set[Credentials],
   scalaVersion: String,
   scalaBinaryVersion: String,
-  extraIvyProps: Map[String, String] = Map.empty
+  extraIvyProps: Map[String, String] = Map.empty,
+  artifactClassifiers: Seq[String] = Seq("tests", "sources")
 ) {
 
   private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
@@ -335,7 +336,11 @@ class CoursierArtifactFetcher(
 
       val mainArtifacts = resolution.dependencyArtifacts().toSet
       val classifierArtifacts =
-        resolution.dependencyArtifacts(classifiers = Some(Seq("tests", "sources", "javadoc").map(Classifier(_)))).toSet
+        artifactClassifiers.distinct match {
+          case Nil => Set.empty[(CDependency, Publication, CArtifact)]
+          case classifiers =>
+            resolution.dependencyArtifacts(classifiers = Some(classifiers.map(Classifier(_)))).toSet
+        }
 
       val artifacts =
         mainArtifacts

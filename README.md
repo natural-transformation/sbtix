@@ -112,6 +112,16 @@ in
 By default, sbtix keeps verbose resolver diagnostics off for performance. To enable
 the full `[SBTIX_DEBUG]` output, set `SBTIX_DEBUG=1` (or pass `-Dsbtix.debug=true`).
 
+By default, generated locks include main artifacts plus the `tests` and `sources`
+classifier artifacts, and skip `javadoc` jars to avoid extra downloads. To include
+javadocs, add this to your sbt build:
+
+```scala
+sbtixArtifactClassifiers += "javadoc"
+```
+
+Set `sbtixArtifactClassifiers := Seq.empty` if you only want main artifacts.
+
 #### Typical regeneration flow
 
 1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`) **and runs `genComposition`** to render `sbtix-generated.nix`. Check these files into VCS so CI and teammates get the same locks.

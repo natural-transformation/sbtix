@@ -55,13 +55,14 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     )
     
     // Call the fetcher
-        val (repos, artifacts, provided, errors) = fetcher(dependencies)
+    val (repos, artifacts, provided, errors) = fetcher(dependencies)
     
     // Verify the results
     repos should not be empty
     artifacts should not be empty
-        errors.flatMap(_.errors) shouldBe empty
-        provided shouldBe empty
+    errors.flatMap(_.errors) shouldBe empty
+    provided shouldBe empty
+    artifacts.exists(_.relativePath.contains("-javadoc.jar")) shouldBe false
     
     // Print some debug info
     println(s"Repositories: ${repos.size}")
@@ -69,6 +70,33 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     artifacts.take(3).foreach { a =>
       println(s"Artifact: ${a.repoName}/${a.relativePath} - ${a.sha256}")
     }
+  }
+
+  it should "include javadoc classifier artifacts when configured" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+
+    val dependencies = Set(
+      Dependency(
+        ModuleID("com.typesafe", "config", "1.4.2")
+      )
+    )
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.20",
+      "2.12",
+      artifactClassifiers = Seq("javadoc")
+    )
+
+    val (_, artifacts, provided, errors) = fetcher(dependencies)
+
+    errors.flatMap(_.errors) shouldBe empty
+    provided shouldBe empty
+    artifacts.exists(_.relativePath.contains("-javadoc.jar")) shouldBe true
   }
 
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {

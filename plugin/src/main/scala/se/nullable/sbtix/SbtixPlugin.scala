@@ -308,6 +308,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     
     val sbtixNixFile = settingKey[File]("The Nix file to generate")
     val sbtixRepository = settingKey[String]("URL of the repository to use")
+    val sbtixArtifactClassifiers = settingKey[Seq[String]]("Artifact classifiers to lock in addition to main artifacts")
     
     // Setting to customize the default.nix content
     val sbtixNixContentTemplate = settingKey[(String, String, String, String) => String]("Function to generate Nix file content")
@@ -470,6 +471,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     sbtixNixFile := new File(baseDirectory.value, "sbtix.nix"),
     
     sbtixRepository := "https://repo1.maven.org/maven2",
+
+    sbtixArtifactClassifiers := Seq("tests", "sources"),
     
     // Setting the default template for generated Nix content
     sbtixNixContentTemplate := generatedNixContentTemplate _,
@@ -499,7 +502,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         projectResolvers,
         fetchedCredentials,
         scalaVer,
-        scalaBinaryVersion.value
+        scalaBinaryVersion.value,
+        artifactClassifiers = sbtixArtifactClassifiers.value
       )
       val (repos, artifacts, provided, errors) = fetcher(dependencies)
       logProvidedArtifacts(log, "sbtixBuildInputs", provided)
@@ -546,7 +550,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         projectResolvers,
         projectCredentials,
         scalaVer,
-        scalaBinaryVersion.value
+        scalaBinaryVersion.value,
+        artifactClassifiers = sbtixArtifactClassifiers.value
       )
 
       val (repos, artifacts, provided, errors) = fetcher(dependencies)
@@ -599,7 +604,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
               "scalaBinaryVersion" -> scalaBinaryVersion.value,
               "sbtVersion" -> sbtBinaryVersion.value,
               "sbtBinaryVersion" -> sbtBinaryVersion.value
-            )
+            ),
+            artifactClassifiers = sbtixArtifactClassifiers.value
           )
           val pluginDependencies = pluginModuleIds.map(Dependency(_))
           val (pluginRepos, pluginArtifacts, pluginProvided, pluginErrors) =
@@ -1006,4 +1012,4 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   )
 }
 
-// NixWriter isn't needed anymore as BuildInputs has toNix method 
+// NixWriter isn't needed anymore as BuildInputs has toNix method
