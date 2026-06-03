@@ -705,18 +705,32 @@ class CoursierArtifactFetcher(
       file: File,
       module: ModuleID,
       repoDescriptors: Seq[RepoDescriptor]
-  ): Set[NixArtifact] = {
-    if (url.startsWith("file:") && isLocalIvyUrl(url)) Set.empty
-    else {
-      val base = lockCachedArtifact(url, file, repoDescriptors)
-      val pom =
-        if (url.endsWith(".pom")) Set.empty[NixArtifact]
-        else cachedMavenPom(module, url, repoDescriptors).flatMap { case (pomUrl, pomFile) =>
+  ): Set[NixArtifact] =
+    Option(url)
+      .filter(shouldLockReportArtifact)
+      .map { lockableUrl =>
+        lockCachedArtifact(lockableUrl, file, repoDescriptors) ++
+          reportPomArtifacts(lockableUrl, file, module, repoDescriptors)
+      }
+      .getOrElse(Set.empty)
+
+  private def shouldLockReportArtifact(url: String): Boolean =
+    !(url.startsWith("file:") && isLocalIvyUrl(url))
+
+  private def reportPomArtifacts(
+      url: String,
+      file: File,
+      module: ModuleID,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[NixArtifact] =
+    url match {
+      case pomUrl if pomUrl.endsWith(".pom") =>
+        collectCachedPomAncestors(file, repoDescriptors)
+      case artifactUrl =>
+        cachedMavenPom(module, artifactUrl, repoDescriptors).flatMap { case (pomUrl, pomFile) =>
           lockCachedArtifact(pomUrl, pomFile, repoDescriptors) ++ collectCachedPomAncestors(pomFile, repoDescriptors)
         }
-      base ++ pom
     }
-  }
 
   private def lockCachedArtifact(
       url: String,

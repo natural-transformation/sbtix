@@ -3,7 +3,7 @@ package se.nullable.sbtix
 import coursier.core.Repository
 import sbt._
 import sbt.Keys._
-import sbt.librarymanagement.{ CrossVersion, Patterns }
+import sbt.librarymanagement.{ CrossVersion, Patterns, UpdateReport }
 import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
@@ -409,12 +409,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private lazy val sampleDefaultTemplate: String =
     loadSampleDefaultTemplate()
   
-  private def declaredPlugins(
-      baseDir: File,
-      scalaBinary: String,
-      sbtBinary: String,
-      log: Logger
-  ): Set[ModuleID] = {
+  private def pluginFilesFrom(baseDir: File): List[File] = {
     @annotation.tailrec
     def collect(dir: File, acc: List[File]): List[File] = {
       if (dir == null) acc
@@ -424,10 +419,44 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         collect(dir.getParentFile, nextAcc)
       }
     }
+    collect(baseDir, Nil)
+  }
 
-    val pluginFiles = collect(baseDir, Nil)
-    pluginFiles.headOption
-      .map { pluginsFile =>
+  private def sbtPluginModuleId(
+      organization: String,
+      rawModule: String,
+      version: String,
+      scalaBinary: String,
+      sbtBinary: String
+  ): ModuleID = {
+    val attrs = Map(
+      "scalaVersion" -> scalaBinary,
+      "sbtVersion" -> sbtBinary,
+      // Keep the namespaced keys that some tools emit, to cover both patterns.
+      "e:scalaVersion" -> scalaBinary,
+      "e:sbtVersion" -> sbtBinary
+    )
+    ModuleID(organization, rawModule, version).withExtraAttributes(attrs)
+  }
+
+  private def parseSbtPluginLine(line: String, scalaBinary: String, sbtBinary: String): Option[ModuleID] = {
+    val trimmed = line.trim
+    trimmed match {
+      case plugin if plugin.startsWith("addSbtPlugin") =>
+        plugin.split('"').toList match {
+          case _ :: org :: _ :: rawModule :: _ :: version :: _ =>
+            Some(sbtPluginModuleId(org.trim, rawModule.trim, version.trim, scalaBinary, sbtBinary))
+          case _ =>
+            None
+        }
+      case _ =>
+        None
+    }
+  }
+
+  private def selectedPluginsFile(pluginFiles: List[File], baseDir: File, log: Logger): Option[File] =
+    pluginFiles.headOption match {
+      case Some(pluginsFile) =>
         SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using plugins.sbt at ${pluginsFile.getAbsolutePath}" }
         pluginFiles.tail match {
           case Nil => ()
@@ -436,79 +465,319 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
               s"[SBTIX_DEBUG] Ignoring additional plugins.sbt candidates: ${rest.map(_.getAbsolutePath).mkString(", ")}"
             }
         }
+        Some(pluginsFile)
+      case None =>
+        SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}" }
+        None
+    }
+
+  private def declaredPlugins(
+      baseDir: File,
+      scalaBinary: String,
+      sbtBinary: String,
+      log: Logger
+  ): Set[ModuleID] =
+    selectedPluginsFile(pluginFilesFrom(baseDir), baseDir, log)
+      .map { pluginsFile =>
         IO.read(pluginsFile)
           .split("\n")
-          .flatMap { line =>
-            val trimmed = line.trim
-            if (trimmed.startsWith("addSbtPlugin")) {
-              val parts = trimmed.split('"')
-              if (parts.length >= 6) {
-                val org = parts(1).trim
-                val rawModule = parts(3).trim
-                val version = parts(5).trim
-                val attrs = Map(
-                  "scalaVersion" -> scalaBinary,
-                  "sbtVersion" -> sbtBinary,
-                  // Keep the namespaced keys that some tools emit, to cover both patterns.
-                  "e:scalaVersion" -> scalaBinary,
-                  "e:sbtVersion" -> sbtBinary
-                )
-                Some(ModuleID(org, rawModule, version).withExtraAttributes(attrs))
-              } else None
-            } else None
-          }
+          .flatMap(parseSbtPluginLine(_, scalaBinary, sbtBinary))
           .toSet
       }
-      .getOrElse {
-        SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugins.sbt found starting from ${baseDir.getAbsolutePath}" }
-        Set.empty
+      .getOrElse(Set.empty)
+
+  private def sbtBridgeModuleName(scalaVersion: String): Option[String] =
+    scalaVersion match {
+      case version if version.startsWith("3.")    => Some("scala3-sbt-bridge")
+      case version if version.startsWith("2.13.") => Some("scala2-sbt-bridge")
+      case _                                      => None
     }
-  }
+
+  private def sbtToolingDependencies(scalaVersion: String, log: Logger): Set[Dependency] =
+    sbtBridgeModuleName(scalaVersion).map { bridgeName =>
+      val bridge = ModuleID("org.scala-lang", bridgeName, scalaVersion)
+      SbtixDebug.info(log) {
+        s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala builds: ${bridge.organization}:${bridge.name}:${bridge.revision}"
+      }
+      Dependency(bridge)
+    }.toSet
 
   private val ScalafmtConfigVersion = """(?m)^\s*version\s*=\s*"?([^"\s#]+)"?\s*(?:#.*)?$""".r
 
   private def isSbtScalafmtPlugin(module: ModuleID): Boolean =
     module.organization == "org.scalameta" && module.name == "sbt-scalafmt"
 
-  private def usesSbtScalafmt(pluginModuleIds: Set[ModuleID]): Boolean =
-    pluginModuleIds.exists(isSbtScalafmtPlugin)
+  private sealed trait ScalafmtRuntimePlan
+  private case object NoScalafmtRuntime extends ScalafmtRuntimePlan
+  private final case class LockScalafmtRuntime(dependency: Dependency) extends ScalafmtRuntimePlan
+  private final case class MissingScalafmtConfig(config: File) extends ScalafmtRuntimePlan
+  private final case class MissingScalafmtVersion(config: File) extends ScalafmtRuntimePlan
+
+  private def existingFile(file: File): Option[File] =
+    Some(file).filter(_.isFile)
+
+  private def scalafmtConfigVersion(config: File): Option[String] = {
+    val source = Source.fromFile(config, StandardCharsets.UTF_8.name())
+    try ScalafmtConfigVersion.findFirstMatchIn(source.mkString).map(_.group(1))
+    finally source.close()
+  }
+
+  private def scalafmtDependency(version: String): Dependency =
+    Dependency(ModuleID("org.scalameta", "scalafmt-core_2.13", version))
+
+  private def scalafmtRuntimePlan(baseDir: File, pluginModuleIds: Set[ModuleID]): ScalafmtRuntimePlan =
+    pluginModuleIds
+      .find(isSbtScalafmtPlugin)
+      .map(_ => scalafmtConfigPlan(new File(baseDir, ".scalafmt.conf")))
+      .getOrElse(NoScalafmtRuntime)
+
+  private def scalafmtConfigPlan(config: File): ScalafmtRuntimePlan =
+    existingFile(config)
+      .map(scalafmtVersionPlan)
+      .getOrElse(MissingScalafmtConfig(config))
+
+  private def scalafmtVersionPlan(config: File): ScalafmtRuntimePlan =
+    scalafmtConfigVersion(config)
+      .map(scalafmtDependency)
+      .map(LockScalafmtRuntime)
+      .getOrElse(MissingScalafmtVersion(config))
 
   private def scalafmtToolingDependencies(
       baseDir: File,
       pluginModuleIds: Set[ModuleID],
       log: Logger
-  ): Set[Dependency] = {
-    if (!usesSbtScalafmt(pluginModuleIds)) Set.empty
-    else {
-      val scalafmtConfig = new File(baseDir, ".scalafmt.conf")
-      if (!scalafmtConfig.isFile) {
+  ): Set[Dependency] =
+    scalafmtRuntimePlan(baseDir, pluginModuleIds) match {
+      case NoScalafmtRuntime =>
+        Set.empty
+      case LockScalafmtRuntime(dependency) =>
+        SbtixDebug.info(log) {
+          val module = dependency.moduleId
+          s"[SBTIX_DEBUG] Adding scalafmt runtime dependency for offline Nix builds: ${module.organization}:${module.name}:${module.revision}"
+        }
+        Set(dependency)
+      case MissingScalafmtConfig(config) =>
         log.warn(
-          s"sbtix: detected sbt-scalafmt, but no .scalafmt.conf was found at ${scalafmtConfig.getAbsolutePath}; " +
+          s"sbtix: detected sbt-scalafmt, but no .scalafmt.conf was found at ${config.getAbsolutePath}; " +
             "if the Nix build downloads scalafmt, add the missing scalafmt artifacts to manual-repo.nix."
         )
         Set.empty
-      } else {
-        val source = Source.fromFile(scalafmtConfig, StandardCharsets.UTF_8.name())
-        val contents =
-          try source.mkString
-          finally source.close()
-        ScalafmtConfigVersion.findFirstMatchIn(contents) match {
-          case Some(versionMatch) =>
-            val version = versionMatch.group(1)
-            val scalafmtCore = ModuleID("org.scalameta", "scalafmt-core_2.13", version)
-            SbtixDebug.info(log) {
-              s"[SBTIX_DEBUG] Adding scalafmt runtime dependency for offline Nix builds: ${scalafmtCore.organization}:${scalafmtCore.name}:${scalafmtCore.revision}"
-            }
-            Set(Dependency(scalafmtCore))
-          case None =>
-            log.warn(
-              s"sbtix: detected sbt-scalafmt, but could not read a formatter version from ${scalafmtConfig.getAbsolutePath}; " +
-                "if the Nix build downloads scalafmt, add the missing scalafmt artifacts to manual-repo.nix."
-            )
-            Set.empty
-        }
-      }
+      case MissingScalafmtVersion(config) =>
+        log.warn(
+          s"sbtix: detected sbt-scalafmt, but could not read a formatter version from ${config.getAbsolutePath}; " +
+            "if the Nix build downloads scalafmt, add the missing scalafmt artifacts to manual-repo.nix."
+        )
+        Set.empty
     }
+
+  private case class FetchResult(
+      repos: Set[NixRepo] = Set.empty[NixRepo],
+      artifacts: Set[NixArtifact] = Set.empty[NixArtifact],
+      provided: Set[ProvidedArtifact] = Set.empty[ProvidedArtifact],
+      errors: Set[ResolutionErrors] = Set.empty[ResolutionErrors]
+  ) {
+    def ++(other: FetchResult): FetchResult =
+      FetchResult(
+        repos ++ other.repos,
+        artifacts ++ other.artifacts,
+        provided ++ other.provided,
+        errors ++ other.errors
+      )
+
+    def hasLockedArtifacts: Boolean =
+      repos.nonEmpty || artifacts.nonEmpty
+  }
+
+  private object FetchResult {
+    val empty: FetchResult = FetchResult()
+
+    def combine(results: Iterable[FetchResult]): FetchResult =
+      results.foldLeft(empty)(_ ++ _)
+
+    def fromResolved(result: (Set[NixRepo], Set[NixArtifact], Set[ProvidedArtifact], Set[ResolutionErrors])): FetchResult = {
+      val (repos, artifacts, provided, errors) = result
+      FetchResult(repos, artifacts, provided, errors)
+    }
+
+    def fromLocked(result: (Set[NixRepo], Set[NixArtifact])): FetchResult = {
+      val (repos, artifacts) = result
+      FetchResult(repos, artifacts)
+    }
+  }
+
+  private final case class DependencyFetch(
+      dependencies: Set[Dependency],
+      artifactClassifiers: Seq[String],
+      context: Option[String] = None
+  )
+
+  private final case class FetcherConfig(
+      log: Logger,
+      resolvers: Set[Resolver],
+      credentials: Set[Credentials],
+      scalaVersion: String,
+      scalaBinaryVersion: String,
+      extraIvyProps: Map[String, String] = Map.empty
+  ) {
+    private def fetcher(artifactClassifiers: Seq[String]): CoursierArtifactFetcher =
+      new CoursierArtifactFetcher(
+        log,
+        resolvers,
+        credentials,
+        scalaVersion,
+        scalaBinaryVersion,
+        extraIvyProps = extraIvyProps,
+        artifactClassifiers = artifactClassifiers
+      )
+
+    def resolveDependencies(fetch: DependencyFetch): FetchResult =
+      FetchResult.fromResolved(fetcher(fetch.artifactClassifiers)(fetch.dependencies))
+
+    def lockUpdateReport(report: UpdateReport): FetchResult =
+      FetchResult.fromLocked(fetcher(Seq.empty[String]).fromUpdateReport(report))
+  }
+
+  private sealed trait PluginFetchPlan
+  private case object NoPluginFetch extends PluginFetchPlan
+  private final case class PluginReportFetch(report: UpdateReport) extends PluginFetchPlan
+  private final case class PluginDependencyFetches(fetches: Seq[DependencyFetch]) extends PluginFetchPlan
+
+  private def nonEmptyFetches(fetches: DependencyFetch*): Seq[DependencyFetch] =
+    fetches.filter(_.dependencies.nonEmpty)
+
+  private def runFetches(fetches: Seq[DependencyFetch], config: FetcherConfig): FetchResult =
+    FetchResult.combine(fetches.map { fetch =>
+      val result = config.resolveDependencies(fetch)
+      fetch.context.foreach { context =>
+        logProvidedArtifacts(config.log, context, result.provided)
+        logResolutionDiagnostics(config.log, context, result.errors)
+      }
+      result
+    })
+
+  private def moduleFetch(modules: Set[ModuleID], artifactClassifiers: Seq[String], context: String): DependencyFetch =
+    DependencyFetch(modules.map(Dependency(_)), artifactClassifiers, Some(context))
+
+  private def dependencyFetchPlan(
+      projectDependencies: Set[Dependency],
+      scalafmtRuntimeDependencies: Set[Dependency],
+      artifactClassifiers: Seq[String]
+  ): Seq[DependencyFetch] =
+    nonEmptyFetches(
+      DependencyFetch(projectDependencies, artifactClassifiers, Some("sbtixGenerate")),
+      DependencyFetch(scalafmtRuntimeDependencies, Seq.empty[String], Some("sbtixGenerate (scalafmt runtime)"))
+    )
+
+  private val PluginIvyPattern =
+    "[organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
+
+  private def defaultPluginResolvers: Set[Resolver] = {
+    val mavenPattern = "[organization]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]"
+    Set(
+      Resolver.sbtPluginRepo("releases"),
+      Resolver.url(
+        "sbt-plugin-releases",
+        sbt.url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+      )(Patterns(PluginIvyPattern)),
+      Resolver.url(
+        "artima-maven",
+        sbt.url("https://repo.artima.com/releases")
+      )(Patterns(mavenPattern))
+    )
+  }
+
+  private def pluginIvyProperties(scalaBinaryVersion: String, sbtBinaryVersion: String): Map[String, String] =
+    Map(
+      "scalaVersion" -> scalaBinaryVersion,
+      "scalaBinaryVersion" -> scalaBinaryVersion,
+      "sbtVersion" -> sbtBinaryVersion,
+      "sbtBinaryVersion" -> sbtBinaryVersion
+    )
+
+  private def pluginFetchPlan(
+      pluginModuleIds: Set[ModuleID],
+      updateReport: Option[UpdateReport],
+      artifactClassifiers: Seq[String]
+  ): PluginFetchPlan = {
+    val (scalafmtPluginModuleIds, regularPluginModuleIds) =
+      pluginModuleIds.partition(isSbtScalafmtPlugin)
+
+    (pluginModuleIds.isEmpty, scalafmtPluginModuleIds.nonEmpty, updateReport) match {
+      case (true, _, _) =>
+        NoPluginFetch
+      case (_, true, Some(report)) =>
+        PluginReportFetch(report)
+      case _ =>
+        PluginDependencyFetches(pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers))
+    }
+  }
+
+  private def pluginDependencyFetchPlan(
+      regularPluginModuleIds: Set[ModuleID],
+      scalafmtPluginModuleIds: Set[ModuleID],
+      artifactClassifiers: Seq[String]
+  ): Seq[DependencyFetch] =
+    nonEmptyFetches(
+      moduleFetch(regularPluginModuleIds, artifactClassifiers, "sbtixGenerate (plugin)"),
+      moduleFetch(scalafmtPluginModuleIds, Seq.empty[String], "sbtixGenerate (sbt-scalafmt plugin)")
+    )
+
+  private def logPluginModules(pluginModuleIds: Set[ModuleID], log: Logger): Unit = {
+    SbtixDebug.info(log) { s"[SBTIX_DEBUG] Plugin classpath contains ${pluginModuleIds.size} plugin modules" }
+    SbtixDebug.info(log) {
+      pluginModuleIds
+        .toSeq
+        .sortBy(m => s"${m.organization}:${m.name}")
+        .map(m => s"${m.organization}:${m.name}:${m.revision}")
+        .mkString("[SBTIX_DEBUG] Plugin modules => ", ", ", "")
+    }
+  }
+
+  private def fetchPluginPlan(
+      plan: PluginFetchPlan,
+      config: FetcherConfig
+  ): FetchResult =
+    plan match {
+      case NoPluginFetch =>
+        FetchResult.empty
+      case PluginReportFetch(report) =>
+        val result = config.lockUpdateReport(report)
+        SbtixDebug.info(config.log) {
+          s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report because sbt-scalafmt is present"
+        }
+        result
+      case PluginDependencyFetches(fetches) =>
+        runFetches(fetches, config)
+    }
+
+  private def fetchPluginRepositories(
+      pluginModuleIds: Set[ModuleID],
+      updateReport: Option[UpdateReport],
+      pluginResolvers: Set[Resolver],
+      projectResolvers: Set[Resolver],
+      credentials: Set[Credentials],
+      scalaVersion: String,
+      scalaBinaryVersion: String,
+      sbtBinaryVersion: String,
+      artifactClassifiers: Seq[String],
+      log: Logger
+  ): Option[(String, Set[NixRepo], Set[NixArtifact])] = {
+    pluginModuleIds.headOption.foreach(_ => logPluginModules(pluginModuleIds, log))
+    val config =
+      FetcherConfig(
+        log,
+        pluginResolvers ++ projectResolvers ++ defaultPluginResolvers,
+        credentials,
+        scalaVersion,
+        scalaBinaryVersion,
+        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion)
+      )
+    val result = fetchPluginPlan(
+      pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),
+      config
+    )
+    if (result.hasLockedArtifacts) Some((scalaVersion, result.repos, result.artifacts))
+    else None
   }
   
   override lazy val projectSettings = Seq(
@@ -543,19 +812,12 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       
       log.info(s"Processing ${dependencies.size} dependencies from ${projectResolvers.size} resolvers")
       
-      val fetcher = new CoursierArtifactFetcher(
-        log,
-        projectResolvers,
-        fetchedCredentials,
-        scalaVer,
-        scalaBinaryVersion.value,
-        artifactClassifiers = sbtixArtifactClassifiers.value
+      val fetchResult = runFetches(
+        nonEmptyFetches(DependencyFetch(dependencies, sbtixArtifactClassifiers.value, Some("sbtixBuildInputs"))),
+        FetcherConfig(log, projectResolvers, fetchedCredentials, scalaVer, scalaBinaryVersion.value)
       )
-      val (repos, artifacts, provided, errors) = fetcher(dependencies)
-      logProvidedArtifacts(log, "sbtixBuildInputs", provided)
-      logResolutionDiagnostics(log, "sbtixBuildInputs", errors)
       
-      BuildInputs(scalaVer, sbtVer, repos.toSeq, artifacts, provided)
+      BuildInputs(scalaVer, sbtVer, fetchResult.repos.toSeq, fetchResult.artifacts, fetchResult.provided)
     },
     
     sbtixGenerate := {
@@ -576,169 +838,41 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         declaredPlugins(rootBaseDirectory, pluginScalaBinary, sbtBinaryVersion.value, log)
       SbtixDebug.info(log) { s"[SBTIX_DEBUG] Parsed ${pluginModuleIds.size} sbt plugins from project/plugins.sbt" }
 
-      // sbt itself downloads some "tooling" artifacts during compilation, even
-      // when they are not declared as normal project/library dependencies.
-      //
-      // In particular, recent Scala 2.13 builds require `org.scala-lang:scala2-sbt-bridge`
-      // and Scala 3 builds require `org.scala-lang:scala3-sbt-bridge`. Those
-      // bridges are fetched by sbt/Zinc. In the Nix sandbox (offline builds), sbt
-      // cannot download them, so we must lock them in `repo.nix`.
-      val sbtToolingDeps: Set[Dependency] =
-        if (scalaVer.startsWith("2.13.") || scalaVer.startsWith("3.")) {
-          val bridgeName =
-            if (scalaVer.startsWith("3.")) "scala3-sbt-bridge"
-            else "scala2-sbt-bridge"
-          val bridge = ModuleID("org.scala-lang", bridgeName, scalaVer)
-          SbtixDebug.info(log) {
-            s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala builds: ${bridge.organization}:${bridge.name}:${bridge.revision}"
-          }
-          Set(Dependency(bridge))
-        } else Set.empty
-
-      val additionalToolingDeps =
-        sbtToolingDeps
       val scalafmtRuntimeDeps =
         scalafmtToolingDependencies(rootBaseDirectory, pluginModuleIds, log)
 
+      // sbt itself downloads some "tooling" artifacts during compilation, even
+      // when they are not declared as normal project/library dependencies. Lock
+      // them in repo.nix so Nix sandbox builds stay offline.
       val dependencies: Set[Dependency] =
         filterLockableModules(
           (Compile / allDependencies).value,
           log,
           "sbtixGenerate"
-        ).map(Dependency(_)).toSet ++ additionalToolingDeps
-      
-      // Create artifact fetcher and fetch all artifacts
-      val fetcher = new CoursierArtifactFetcher(
-        log,
-        projectResolvers,
-        projectCredentials,
-        scalaVer,
-        scalaBinaryVersion.value,
-        artifactClassifiers = sbtixArtifactClassifiers.value
+        ).map(Dependency(_)).toSet ++ sbtToolingDependencies(scalaVer, log)
+
+      val fetchResult = runFetches(
+        dependencyFetchPlan(dependencies, scalafmtRuntimeDeps, sbtixArtifactClassifiers.value),
+        FetcherConfig(log, projectResolvers, projectCredentials, scalaVer, scalaBinaryVersion.value)
       )
 
-      val (projectRepos, projectArtifacts, projectProvided, projectErrors) = fetcher(dependencies)
-      val (scalafmtRepos, scalafmtArtifacts, scalafmtProvided, scalafmtErrors) =
-        if (scalafmtRuntimeDeps.nonEmpty) {
-          val scalafmtFetcher = new CoursierArtifactFetcher(
-            log,
-            projectResolvers,
-            projectCredentials,
-            scalaVer,
-            scalaBinaryVersion.value,
-            artifactClassifiers = Seq.empty
-          )
-          scalafmtFetcher(scalafmtRuntimeDeps)
-        } else {
-          (Set.empty[NixRepo], Set.empty[NixArtifact], Set.empty[ProvidedArtifact], Set.empty[ResolutionErrors])
-        }
-      val repos = projectRepos ++ scalafmtRepos
-      val artifacts = projectArtifacts ++ scalafmtArtifacts
-      val provided = projectProvided ++ scalafmtProvided
-      val errors = projectErrors ++ scalafmtErrors
-      logProvidedArtifacts(log, "sbtixGenerate", provided)
-      logResolutionDiagnostics(log, "sbtixGenerate", errors)
+      val repos = fetchResult.repos
+      val artifacts = fetchResult.artifacts
+      val provided = fetchResult.provided
 
-      val pluginFetchResult: Option[(String, Set[NixRepo], Set[NixArtifact])] = {
-        if (pluginModuleIds.nonEmpty) {
-          val pluginResolvers =
-            pluginData.resolvers.map(_.toSet).getOrElse(Set.empty[Resolver])
-          val pluginIvyPattern =
-            "[organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
-          val defaultPluginResolvers: Set[Resolver] = {
-            val mavenPattern = "[organization]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]"
-            Set(
-              Resolver.sbtPluginRepo("releases"),
-              Resolver.url(
-                "sbt-plugin-releases",
-                sbt.url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
-              )(Patterns(pluginIvyPattern)),
-              Resolver.url(
-                "artima-maven",
-                sbt.url("https://repo.artima.com/releases")
-              )(Patterns(mavenPattern))
-            )
-          }
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Plugin classpath contains ${pluginModuleIds.size} plugin modules" }
-          SbtixDebug.info(log) {
-            pluginModuleIds
-              .toSeq
-              .sortBy(m => s"${m.organization}:${m.name}")
-              .map(m => s"${m.organization}:${m.name}:${m.revision}")
-              .mkString("[SBTIX_DEBUG] Plugin modules => ", ", ", "")
-          }
-          def fetchPluginModules(
-              modules: Set[ModuleID],
-              artifactClassifiers: Seq[String],
-              context: String
-          ): (Set[NixRepo], Set[NixArtifact]) = {
-            val pluginFetcher = new CoursierArtifactFetcher(
-              log,
-              pluginResolvers ++ projectResolvers ++ defaultPluginResolvers,
-              projectCredentials,
-              scalaVer,
-              scalaBinaryVersion.value,
-              extraIvyProps = Map(
-                "scalaVersion" -> scalaBinaryVersion.value,
-                "scalaBinaryVersion" -> scalaBinaryVersion.value,
-                "sbtVersion" -> sbtBinaryVersion.value,
-                "sbtBinaryVersion" -> sbtBinaryVersion.value
-              ),
-              artifactClassifiers = artifactClassifiers
-            )
-            val (fetchedRepos, fetchedArtifacts, fetchedProvided, fetchedErrors) =
-              pluginFetcher(modules.map(Dependency(_)))
-            logProvidedArtifacts(log, context, fetchedProvided)
-            logResolutionDiagnostics(log, context, fetchedErrors)
-            (fetchedRepos, fetchedArtifacts)
-          }
-
-          val (scalafmtPluginModuleIds, regularPluginModuleIds) =
-            pluginModuleIds.partition(isSbtScalafmtPlugin)
-          val pluginReportResult =
-            if (scalafmtPluginModuleIds.nonEmpty) {
-              pluginData.report.map { report =>
-                val reportFetcher = new CoursierArtifactFetcher(
-                  log,
-                  pluginResolvers ++ projectResolvers ++ defaultPluginResolvers,
-                  projectCredentials,
-                  scalaVer,
-                  scalaBinaryVersion.value,
-                  extraIvyProps = Map(
-                    "scalaVersion" -> scalaBinaryVersion.value,
-                    "scalaBinaryVersion" -> scalaBinaryVersion.value,
-                    "sbtVersion" -> sbtBinaryVersion.value,
-                    "sbtBinaryVersion" -> sbtBinaryVersion.value
-                  ),
-                  artifactClassifiers = Seq.empty
-                )
-                val (reportRepos, reportArtifacts) = reportFetcher.fromUpdateReport(report)
-                SbtixDebug.info(log) {
-                  s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report because sbt-scalafmt is present"
-                }
-                (reportRepos, reportArtifacts)
-              }
-            } else None
-
-          val (pluginRepos, pluginArtifacts) = pluginReportResult.getOrElse {
-            val pluginResults =
-              Seq(
-                (regularPluginModuleIds, sbtixArtifactClassifiers.value, "sbtixGenerate (plugin)"),
-                (scalafmtPluginModuleIds, Seq.empty[String], "sbtixGenerate (sbt-scalafmt plugin)")
-              ).collect {
-                case (moduleIds, classifiers, context) if moduleIds.nonEmpty =>
-                  fetchPluginModules(moduleIds, classifiers, context)
-              }
-            (
-              pluginResults.flatMap(_._1).toSet,
-              pluginResults.flatMap(_._2).toSet
-            )
-          }
-          if (pluginRepos.nonEmpty || pluginArtifacts.nonEmpty)
-            Some((scalaVer, pluginRepos, pluginArtifacts))
-          else None
-        } else None
-      }
+      val pluginFetchResult =
+        fetchPluginRepositories(
+          pluginModuleIds,
+          pluginData.report,
+          pluginData.resolvers.map(_.toSet).getOrElse(Set.empty[Resolver]),
+          projectResolvers,
+          projectCredentials,
+          scalaVer,
+          scalaBinaryVersion.value,
+          sbtBinaryVersion.value,
+          sbtixArtifactClassifiers.value,
+          log
+        )
       
       // Generate the Nix expressions and write to files
       val currentBase = baseDirectory.value

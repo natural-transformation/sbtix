@@ -3,6 +3,7 @@
 $ exists repo.nix
 $ exists project/repo.nix
 $ exec grep -q 'org/scalameta/scalafmt-core_2.13/3.8.3/scalafmt-core_2.13-3.8.3.jar' repo.nix
+$ exec grep -q 'org/scalameta/sbt-scalafmt_2.12_1.0/2.5.6/sbt-scalafmt-2.5.6.pom' project/repo.nix
 > genComposition
 $ exists default.nix
 $ exec rm -rf result
