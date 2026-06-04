@@ -2,7 +2,7 @@ sbtPlugin := true
 
 name         := "sbtix"
 organization := "se.nullable.sbtix"
-version      := "0.5.0"
+version      := "1.0.0"
 
 publishTo := {
     if (isSnapshot.value) {
@@ -14,12 +14,12 @@ publishTo := {
 
 
 licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
-homepage := Some(url("https://gitlab.com/teozkr/Sbtix"))
+homepage := Some(url("https://github.com/natural-transformation/sbtix"))
 
 scmInfo := Some(
   ScmInfo(
-    url("https://gitlab.com/teozkr/sbtix"),
-    "scm:git@gitlab.com:teozkr/sbtix.git"
+    url("https://github.com/natural-transformation/sbtix"),
+    "scm:git:https://github.com/natural-transformation/sbtix.git"
   )
 )
 

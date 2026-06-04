@@ -27,7 +27,7 @@ object NixPlugin extends AutoPlugin {
     sbtixNixFile := new File(baseDirectory.value, "sbtix.nix"),
     nixRepoFile := new File(baseDirectory.value, "repo.nix"),
     nixProjectRepo := new File(new File(baseDirectory.value, "project"), "repo.nix"),
-    sbtixVersion := "0.3-SNAPSHOT"
+    sbtixVersion := "1.0.0"
   )
 
   override def globalSettings = Seq(

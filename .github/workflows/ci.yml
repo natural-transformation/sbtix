@@ -57,6 +57,12 @@ jobs:
             sbt "scripted sbtix/private-auth"
           '
 
+      - name: Run scripted scalafmt test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/scalafmt"'
+
+      - name: Run scripted Scala 3 test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/scala3"'
+
   nix:
     name: Nix build and integration (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}

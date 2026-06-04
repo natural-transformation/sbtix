@@ -27,12 +27,23 @@ This pipeline keeps your sbt workflow fast (dependency metadata is cached) while
 
 ## Why not? (caveats)
 
-* Pre-1.0 / beta: used in production, but expect occasional breaking changes while the API and Nix/SBT integration stabilizes. Please report any issues!
+* Sbtix 1.0.0 is intended as the stable baseline for the current CLI, generated Nix, and builder APIs. Please report any regressions or missing offline artifacts.
 * Some sbt-internal tooling artifacts are not declared as normal project/library dependencies. sbtix locks the Scala 2.13 / Scala 3 compiler bridge (`org.scala-lang:scala2-sbt-bridge` / `org.scala-lang:scala3-sbt-bridge`) automatically, but you may still need to add rare missing artifacts to `manual-repo.nix`.
 * sbtix detects `sbt-scalafmt` in `project/plugins.sbt` and locks the configured `.scalafmt.conf` formatter runtime automatically, so `scalafmtOnCompile` can run in sandboxed Nix builds. For other plugins that download tooling at runtime, either disable non-build tasks when `SBTIX_NIX_BUILD=1` / `-Dsbtix.nixBuild=true` is set, or add the missing artifacts to `manual-repo.nix`.
 * **Offline sbt bootstrap is pinned:** the generated `sbtix-plugin-repo.nix` (seeded from sbtix’s bundled template under `plugin/sbtix-plugin-repo.nix`) only includes sbt launcher/bootstrap artifacts for the sbt version shipped with sbtix (currently sbt `1.10.7`, e.g. `org.scala-sbt:main_2.12:1.10.7`). If your project uses a different `sbt.version` in `project/build.properties`, a sandboxed/offline `nix build` can fail unless those sbt boot artifacts are also available offline (typically by aligning `sbt.version`, or by manually pinning the missing sbt artifacts in `manual-repo.nix`).
 
 ## How?
+
+Sbtix is intended to be used as a Nix-provided command-line tool. The tool
+loads a matching sbt plugin into a separate sbt global base while it generates
+`repo.nix` and `sbtix-generated.nix`. In normal projects, you should not add
+sbtix to `project/plugins.sbt` yourself; using the Nix CLI keeps the plugin jar,
+Nix builders, templates, and generated source pin on the same sbtix version or
+commit.
+
+Direct sbt-plugin use is mainly for sbtix development or custom internal
+workflows where you deliberately publish/provide the plugin artifact yourself
+and take responsibility for keeping it in sync with the Nix expressions.
 
 To install sbtix either:
 
@@ -62,7 +73,7 @@ Add an input and expose the sbtix CLI in your dev shell:
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Prefer a tag (or pinned commit) so the sbtix input is stable.
-    sbtix.url = "github:natural-transformation/sbtix/v0.5.0";
+    sbtix.url = "github:natural-transformation/sbtix/v1.0.0";
 
     # Optional: keep nixpkgs consistent across inputs.
     sbtix.inputs.nixpkgs.follows = "nixpkgs";
@@ -136,7 +147,15 @@ Set `sbtixArtifactClassifiers := Seq.empty` if you only want main artifacts.
 * run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `sbtix-generated.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is and have your `default.nix` (or another entry point) simply import it.
 * if you do need to hand-roll the derivation, the snippet below shows how to call `sbtix.buildSbtProgram` directly. (Use `buildSbtLibrary` if you are packaging a library or `buildSbtProject` for a custom `installPhase`.) You can keep your custom logic in `default.nix` while still generating `sbtix-generated.nix` for reference.
 
-If you want a starting point, copy `default.nix.example` from this repository into your project and adapt it. The root-level `default.nix` now just raises an error so it no longer looks like part of the build.
+If you want a starting point, copy `default.nix.example` from this repository into your project. It simply imports the generated composition:
+
+```nix
+{ pkgs ? import <nixpkgs> {} }:
+
+import ./sbtix-generated.nix { inherit pkgs; }
+```
+
+The root-level `default.nix` now just raises an error so it no longer looks like part of the build. If you need to hand-roll the derivation instead, use the lower-level API directly:
 
 ```nix
 { pkgs ? import <nixpkgs> {} }: with pkgs;
@@ -162,8 +181,8 @@ in
 * generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
 * rerun `sbtix genComposition` after changing dependencies to regenerate `sbtix-generated.nix` so it stays in sync with both the template and the sbtix revision you are using.
 * check the generated nix files (including `sbtix-generated.nix`) into your source control.
- * finally, run `nix-build` to build!
- * any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.
+* finally, run `nix-build` to build!
+* any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.
 
 #### Keeping nix files separate from the project sources
 
@@ -272,30 +291,30 @@ A: You probably need to add the following resolver to your project for Sbtix to 
 
 ```scala
 // if using PlayFramework
-resolvers += Resolver.url("sbt-plugins-releases", url("https://dl.bintray.com/playframework/sbt-plugin-releases"))(Resolver.ivyStylePatterns)
+resolvers += Resolver.url(
+  "sbt-plugin-releases",
+  url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+)(Resolver.ivyStylePatterns)
 ```
 
 Q: When I `nix-build` it sbt complains `java.io.IOException: Cannot run program "git": error=2, No such file or directory`
 
-A: You are likely depending on a project via git.  This isn't recommended usage for sbtix since it leads to non-deterministic builds. However you can enable this by making two small changes to sbtix.nix, in order to make git a buildInput.
+A: You are likely depending on a project via git. This is not recommended because it can make builds non-deterministic. Prefer replacing the git dependency with a pinned source dependency or a normal repository artifact. If your build really needs to shell out to git, pass it as a build input in your Nix expression:
 
-top of sbtix.nix with git as buildinput
 ```nix
-{ runCommand, fetchurl, lib, stdenv, jdk, sbt, writeText, git }:
+sbtix.buildSbtProgram {
+  # ...
+  buildInputs = [ pkgs.git ];
+}
 ```
 
-bottom of sbtix.nix with git as buildinput
-```nix
-buildInputs = [ jdk sbt git ] ++ buildInputs;
-```
+Q: How do I keep my own `default.nix`?
 
-Q: How do I disable the generation of a `default.nix`?
-
-A: You have to add `generateComposition := false` to your `build.sbt`.
+A: Keep your own `default.nix` in the project. `genComposition` writes `sbtix-generated.nix` every time, but it only writes an example `default.nix` when one does not already exist.
 
 Q: How do I use a different type of SBT build in `default.nix`
 
-A: You can change the value of `compositionType` in your `build.sbt`. Allowed values are `program` and `library`. In the end the `sbtix.buildSbt{compositionType}` API in the nix expressions will be used.
+A: The generated composition uses `sbtix.buildSbtProgram`, which expects a `stage` task. For libraries, call `sbtix.buildSbtLibrary` directly from your own `default.nix`; for custom layouts, call `sbtix.buildSbtProject` with an explicit `installPhase`.
 
 ## Thanks
 

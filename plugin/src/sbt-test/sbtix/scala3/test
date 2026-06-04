@@ -1,0 +1,10 @@
+> compile
+> genNix
+$ exists repo.nix
+$ exists project/repo.nix
+$ exec grep -q 'org/scala-lang/scala3-sbt-bridge/3.3.4/scala3-sbt-bridge-3.3.4.jar' repo.nix
+> genComposition
+$ exists default.nix
+$ exec rm -rf result
+$ exec nix-build
+$ exec result/bin/scala3-fixture
