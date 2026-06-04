@@ -120,7 +120,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     )
 
     val (_, artifacts, provided, errors) = fetcher(dependencies)
-    val metadataArtifacts = artifacts.filter(_.relativePath.endsWith("maven-metadata.xml"))
+    val metadataArtifacts = artifacts.filter(_.relativePath.contains("maven-metadata.xml"))
 
     errors.flatMap(_.errors) shouldBe empty
     provided shouldBe empty

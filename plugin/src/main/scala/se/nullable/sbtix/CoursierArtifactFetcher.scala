@@ -154,7 +154,7 @@ class CoursierArtifactFetcher(
               s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}"
             }
             (lockedAcc, providedAcc + ProvidedArtifact.from(dependency, artifact.url))
-          } else if (isMutableMavenMetadataUrl(artifact.url)) {
+          } else if (isMavenMetadataUrl(artifact.url)) {
             (lockedAcc, providedAcc)
           } else {
             val expanded = fetchAndExpand(artifact, repoDescriptors, dependency)
@@ -167,7 +167,7 @@ class CoursierArtifactFetcher(
     val metaArtifacts = metaArtifactCollector.asScala.toSet
       .filterNot(meta => resolvedUrls.contains(meta.artifactUrl))
       .filterNot(meta => isLocalIvyUrl(meta.artifactUrl))
-      .filterNot(meta => isMutableMavenMetadataUrl(meta.artifactUrl))
+      .filterNot(meta => isMavenMetadataUrl(meta.artifactUrl))
       .flatMap { meta =>
         val descriptor = descriptorForUrl(meta.artifactUrl, repoDescriptors)
         val relative = computeRelativePath(meta.artifactUrl, descriptor)
@@ -507,7 +507,7 @@ class CoursierArtifactFetcher(
         if (
           res.isRight &&
           artifact.url.startsWith("http") &&
-          !isMutableMavenMetadataUrl(artifact.url)
+          !isMavenMetadataUrl(artifact.url)
         ) {
           val checkSum =
             FindArtifactsOfRepo
@@ -722,14 +722,19 @@ class CoursierArtifactFetcher(
       .getOrElse(Set.empty)
 
   private def shouldLockReportArtifact(url: String): Boolean =
-    !isMutableMavenMetadataUrl(url) && !(url.startsWith("file:") && isLocalIvyUrl(url))
+    !isMavenMetadataUrl(url) && !(url.startsWith("file:") && isLocalIvyUrl(url))
 
-  private def isMutableMavenMetadataUrl(url: String): Boolean = {
+  private def isMavenMetadataUrl(url: String): Boolean = {
     val stripped = stripCredentials(url)
+    def isMetadataPath(path: String): Boolean = {
+      val cleanPath = path.takeWhile(ch => ch != '?' && ch != '#')
+      val fileName = cleanPath.split('/').lastOption.getOrElse("")
+      fileName == "maven-metadata.xml" || fileName.startsWith("maven-metadata.xml.")
+    }
     Try(new URI(stripped)).toOption
       .flatMap(uri => Option(uri.getPath))
-      .exists(_.endsWith("/maven-metadata.xml")) ||
-      stripped.takeWhile(_ != '?').endsWith("/maven-metadata.xml")
+      .exists(isMetadataPath) ||
+      isMetadataPath(stripped)
   }
 
   private def reportPomArtifacts(
