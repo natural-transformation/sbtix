@@ -14,7 +14,7 @@ When you touch the templates under `plugin/src/main/resources/sbtix/` (for examp
 
 ```bash
 # NOTE: Keep `plugin.version` in sync with `plugin/build.sbt` (`version := ...`).
-(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=1.0.0 "clean" "genNix" "genComposition")
+(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=1.0.1 "clean" "genNix" "genComposition")
 ```
 
 The scripted tests only check in and assert on the locked `repo.nix` files (`expected/repo.nix` and `expected/project-repo.nix`).  
