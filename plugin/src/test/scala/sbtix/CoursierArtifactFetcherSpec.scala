@@ -99,6 +99,36 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     artifacts.exists(_.relativePath.contains("-javadoc.jar")) shouldBe true
   }
 
+  it should "not lock mutable Maven metadata fetched during version-range resolution" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+
+    val dependencies = Set(
+      Dependency(
+        ModuleID("org.agrona", "agrona", "[1.22.0,1.23.1]")
+      )
+    )
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.20",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, artifacts, provided, errors) = fetcher(dependencies)
+    val metadataArtifacts = artifacts.filter(_.relativePath.endsWith("maven-metadata.xml"))
+
+    errors.flatMap(_.errors) shouldBe empty
+    provided shouldBe empty
+    withClue(s"metadata artifacts should not be pinned in repo.nix: $metadataArtifacts") {
+      metadataArtifacts shouldBe empty
+    }
+  }
+
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {
     val ivyPattern =
       "[organisation]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)([branch]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
