@@ -27,7 +27,7 @@ This pipeline keeps your sbt workflow fast (dependency metadata is cached) while
 
 ## Why not? (caveats)
 
-* Sbtix 1.0.0 is intended as the stable baseline for the current CLI, generated Nix, and builder APIs. Please report any regressions or missing offline artifacts.
+* Sbtix 1.0.x is intended as the stable baseline for the current CLI, generated Nix, and builder APIs. Please report any regressions or missing offline artifacts.
 * Some sbt-internal tooling artifacts are not declared as normal project/library dependencies. sbtix locks the Scala 2.13 / Scala 3 compiler bridge (`org.scala-lang:scala2-sbt-bridge` / `org.scala-lang:scala3-sbt-bridge`) automatically, but you may still need to add rare missing artifacts to `manual-repo.nix`.
 * sbtix detects `sbt-scalafmt` in `project/plugins.sbt` and locks the configured `.scalafmt.conf` formatter runtime automatically, so `scalafmtOnCompile` can run in sandboxed Nix builds. For other plugins that download tooling at runtime, either disable non-build tasks when `SBTIX_NIX_BUILD=1` / `-Dsbtix.nixBuild=true` is set, or add the missing artifacts to `manual-repo.nix`.
 * **Offline sbt bootstrap is pinned:** the generated `sbtix-plugin-repo.nix` (seeded from sbtix’s bundled template under `plugin/sbtix-plugin-repo.nix`) only includes sbt launcher/bootstrap artifacts for the sbt version shipped with sbtix (currently sbt `1.10.7`, e.g. `org.scala-sbt:main_2.12:1.10.7`). If your project uses a different `sbt.version` in `project/build.properties`, a sandboxed/offline `nix build` can fail unless those sbt boot artifacts are also available offline (typically by aligning `sbt.version`, or by manually pinning the missing sbt artifacts in `manual-repo.nix`).
@@ -73,7 +73,7 @@ Add an input and expose the sbtix CLI in your dev shell:
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Prefer a tag (or pinned commit) so the sbtix input is stable.
-    sbtix.url = "github:natural-transformation/sbtix/v1.0.0";
+    sbtix.url = "github:natural-transformation/sbtix/v1.0.1";
 
     # Optional: keep nixpkgs consistent across inputs.
     sbtix.inputs.nixpkgs.follows = "nixpkgs";
