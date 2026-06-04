@@ -154,6 +154,8 @@ class CoursierArtifactFetcher(
               s"[SBTIX_DEBUG] Treating ${dependency.module.organization.value}:${dependency.module.name.value}:${dependency.version} as provided from ${artifact.url}"
             }
             (lockedAcc, providedAcc + ProvidedArtifact.from(dependency, artifact.url))
+          } else if (isMutableMavenMetadataUrl(artifact.url)) {
+            (lockedAcc, providedAcc)
           } else {
             val expanded = fetchAndExpand(artifact, repoDescriptors, dependency)
             (lockedAcc ++ expanded, providedAcc)
@@ -165,6 +167,7 @@ class CoursierArtifactFetcher(
     val metaArtifacts = metaArtifactCollector.asScala.toSet
       .filterNot(meta => resolvedUrls.contains(meta.artifactUrl))
       .filterNot(meta => isLocalIvyUrl(meta.artifactUrl))
+      .filterNot(meta => isMutableMavenMetadataUrl(meta.artifactUrl))
       .flatMap { meta =>
         val descriptor = descriptorForUrl(meta.artifactUrl, repoDescriptors)
         val relative = computeRelativePath(meta.artifactUrl, descriptor)
@@ -501,7 +504,11 @@ class CoursierArtifactFetcher(
             } else read(f)
           } else notFound(f)
 
-        if (res.isRight && artifact.url.startsWith("http")) {
+        if (
+          res.isRight &&
+          artifact.url.startsWith("http") &&
+          !isMutableMavenMetadataUrl(artifact.url)
+        ) {
           val checkSum =
             FindArtifactsOfRepo
               .fetchChecksum(artifact.url, "-Meta- Artifact", f.toURI.toURL)
@@ -715,7 +722,15 @@ class CoursierArtifactFetcher(
       .getOrElse(Set.empty)
 
   private def shouldLockReportArtifact(url: String): Boolean =
-    !(url.startsWith("file:") && isLocalIvyUrl(url))
+    !isMutableMavenMetadataUrl(url) && !(url.startsWith("file:") && isLocalIvyUrl(url))
+
+  private def isMutableMavenMetadataUrl(url: String): Boolean = {
+    val stripped = stripCredentials(url)
+    Try(new URI(stripped)).toOption
+      .flatMap(uri => Option(uri.getPath))
+      .exists(_.endsWith("/maven-metadata.xml")) ||
+      stripped.takeWhile(_ != '?').endsWith("/maven-metadata.xml")
+  }
 
   private def reportPomArtifacts(
       url: String,
