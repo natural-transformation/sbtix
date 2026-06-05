@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2
+
+### Fixed
+
+- Keep declared sbt plugin artifacts locked when `sbt-scalafmt` is also present, so mixed plugin builds keep non-scalafmt plugin artifacts available offline.
+- Deduplicate generated Nix artifact keys when plugin resolution reports URL aliases for the same offline path, preferring artifacts whose URL filename matches the generated lock path.
+
+### Added
+
+- Add a flake-native example application and reusable flake template for using sbtix directly from a flake input without generated composition files.
+
 ## 1.0.1
 
 ### Fixed
