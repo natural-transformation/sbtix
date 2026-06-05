@@ -1,0 +1,49 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1780243769,
+        "narHash": "sha256-x5UQuRsH3MqI0U9afaXSNqzTPSeZlRLvFAav2Ux1pNw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "331800de5053fcebacf6813adb5db9c9dca22a0c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "sbtix": "sbtix"
+      }
+    },
+    "sbtix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780605101,
+        "narHash": "sha256-JupZqO7XUNE+cC4wTGDtjAvwlWYT4jXFwjdcuyMSDcw=",
+        "owner": "natural-transformation",
+        "repo": "sbtix",
+        "rev": "e2d4f820cec08a63adb65268c7bd28ff0159efb7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "natural-transformation",
+        "ref": "v1.0.1",
+        "repo": "sbtix",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

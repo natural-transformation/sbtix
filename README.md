@@ -65,6 +65,11 @@ sbtix provides a number of scripts to generate and update Nix expressions to fet
 If your project is already a Nix flake, adding sbtix as a flake input is the most
 reliable way to keep generation reproducible and flake-pure-safe.
 
+**Full runnable example:** [`examples/flake-app/`](examples/flake-app/) builds a
+minimal app with `nix build` using the flake-native workflow (`sbtix-gen` +
+`buildSbtProgram`). Copy [`flake.nix.example`](flake.nix.example) into your own
+project for a starting template.
+
 Add an input and expose the sbtix CLI in your dev shell:
 
 ```nix
@@ -93,26 +98,68 @@ Add an input and expose the sbtix CLI in your dev shell:
 }
 ```
 
-Then regenerate inside the shell:
+Then choose the workflow that owns your Nix build expression:
+
+```bash
+nix develop
+sbtix-gen
+```
+
+Use `sbtix-gen` when your flake imports sbtix's helper functions from the flake
+input and defines the package itself. This generates the `repo.nix` lockfiles
+that your flake imports; it does not generate or require `sbtix-generated.nix`.
+
+Use `sbtix-gen-all2` when you want sbtix to generate a standalone Nix
+composition:
 
 ```bash
 nix develop
 sbtix-gen-all2
 ```
 
+That path generates `sbtix-generated.nix`, `sbtix.nix`, and
+`sbtix-plugin-repo.nix` in addition to the `repo.nix` lockfiles. Commit those
+files only if your project actually imports the generated composition, for
+example through `default.nix`.
+
 When sbtix is run from a flake-provided binary, `sbtix-generated.nix` embeds a
 pinned sbtix source reference (`builtins.fetchTree` / `fetchgit`) so downstream
 flake evaluation stays pure.
 
-If you want to call sbtix’s Nix helpers directly from your flake, import them
-from the sbtix input:
+To call sbtix's Nix helpers directly from your flake, import them from the sbtix
+input and pick the builder that matches your packaging layout:
 
 ```nix
 let
-  sbtixLib = pkgs.callPackage "${sbtix}/plugin/nix-exprs/sbtix.nix" {};
+  sbtixLib = pkgs.callPackage "${sbtix}/plugin/nix-exprs/sbtix.nix" {
+    jdk = pkgs.jdk;
+    jre = pkgs.jdk;
+  };
 in
-  sbtixLib.buildSbtProgram { /* ... */ }
+  sbtixLib.buildSbtProject {
+    name = "my-app";
+    src = pkgs.lib.cleanSource ./.;
+    repo = [
+      (import ./manual-repo.nix)
+      (import ./repo.nix)
+      (import ./project/repo.nix)
+    ];
+    buildPhase = ''
+      sbt assembly
+    '';
+    installPhase = ''
+      mkdir -p $out/lib
+      cp target/scala-*/my-app.jar $out/lib/
+    '';
+  }
 ```
+
+For a project with an sbt-native-packager `stage` task, use
+`buildSbtProgram`. For a library, use `buildSbtLibrary`. For custom layouts
+such as assembly jars, use `buildSbtProject` with an explicit `installPhase`.
+
+See [`examples/flake-app/flake.nix`](examples/flake-app/flake.nix) for a complete
+`devShells` + `packages.default` setup.
 
 ### Sbtix commands
 
@@ -136,16 +183,42 @@ Set `sbtixArtifactClassifiers := Seq.empty` if you only want main artifacts.
 
 #### Typical regeneration flow
 
-1. `sbtix-gen-all2` – regenerates every `repo.nix` layer (`repo.nix`, `project/repo.nix`, `project/project/repo.nix`) **and runs `genComposition`** to render `sbtix-generated.nix`. Check these files into VCS so CI and teammates get the same locks.
-2. If you did not use `sbtix-gen-all2`, run `sbtix genComposition` to render `sbtix-generated.nix` using the shared template.
+Choose the regeneration flow that matches your Nix build entry point:
+
+1. **Flake-native helper builds:** run `sbtix-gen` to regenerate every
+   `repo.nix` layer (`repo.nix`, `project/repo.nix`,
+   `project/project/repo.nix`). Commit those lockfiles so CI and teammates get
+   the same dependencies. This is the usual flow when your flake imports
+   `${sbtix}/plugin/nix-exprs/sbtix.nix` and calls `buildSbtProgram`,
+   `buildSbtLibrary`, or `buildSbtProject` itself.
+2. **Generated composition builds:** run `sbtix-gen-all2` to regenerate the
+   `repo.nix` layers **and run `genComposition`** to render
+   `sbtix-generated.nix`. Commit the generated composition files only when your
+   project imports them as part of its build.
+3. For generated composition builds, if you did not use `sbtix-gen-all2`, run
+   `sbtix genComposition` to render `sbtix-generated.nix` using the shared
+   template.
    - When sbtix is run from a flake-provided binary (or when `SBTIX_SOURCE_URL`, `SBTIX_SOURCE_REV`, and `SBTIX_SOURCE_NAR_HASH` are set), the generated file embeds a pinned `builtins.fetchTree`/`fetchgit` block that points back to the exact sbtix revision you used for generation. This keeps flake evaluation pure.
    - If those pins are not available, sbtix cannot emit a portable, flake-pure-safe source reference. In that case, regenerate using a flake-provided sbtix (or provide the pins) before running `nix build` in a downstream flake.
-3. Commit the refreshed `repo.nix` files (and the generated `.nix` files you intend to keep, e.g. `sbtix-generated.nix`) before running `nix build`.
+4. Commit the refreshed `repo.nix` files (and any generated `.nix` files that
+   your build actually imports, e.g. `sbtix-generated.nix`) before running
+   `nix build`.
 
 ### Creating a build
 
-* run `sbtix genComposition` (or `sbt genComposition` inside your project) to have sbtix emit `sbtix-generated.nix` for you. The file is rendered from the same template used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`, Ivy generation, and install logic. Check it in as-is and have your `default.nix` (or another entry point) simply import it.
-* if you do need to hand-roll the derivation, the snippet below shows how to call `sbtix.buildSbtProgram` directly. (Use `buildSbtLibrary` if you are packaging a library or `buildSbtProject` for a custom `installPhase`.) You can keep your custom logic in `default.nix` while still generating `sbtix-generated.nix` for reference.
+* For generated composition builds, run `sbtix genComposition` (or
+  `sbt genComposition` inside your project) to have sbtix emit
+  `sbtix-generated.nix` for you. The file is rendered from the same template
+  used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`,
+  Ivy generation, and install logic. Check it in as-is and have your
+  `default.nix` (or another entry point) simply import it.
+* For flake-native or custom builds, call the helper functions from your flake
+  input instead of importing the generated composition. Use `buildSbtProgram`
+  for projects with a `stage` task, `buildSbtLibrary` for libraries, or
+  `buildSbtProject` when you need a custom `installPhase`. In this flow, the
+  generated `repo.nix` files are the source-control lockfiles;
+  `sbtix-generated.nix`, `sbtix.nix`, and `sbtix-plugin-repo.nix` are not
+  required unless your build imports them.
 
 If you want a starting point, copy `default.nix.example` from this repository into your project. It simply imports the generated composition:
 
@@ -178,10 +251,13 @@ in
     }
 ```
 
-* generate your repo.nix files with one of the commands listed above. `sbtix-gen-all2` is recommended.
-* rerun `sbtix genComposition` after changing dependencies to regenerate `sbtix-generated.nix` so it stays in sync with both the template and the sbtix revision you are using.
-* check the generated nix files (including `sbtix-generated.nix`) into your source control.
-* finally, run `nix-build` to build!
+* generate your repo.nix files with one of the commands listed above.
+* if you use the generated composition path, rerun `sbtix genComposition` after
+  changing dependencies to regenerate `sbtix-generated.nix` so it stays in sync
+  with both the template and the sbtix revision you are using.
+* check the generated nix files that your build imports into your source control.
+* finally, run `nix-build` for generated composition builds or `nix build .#...`
+  for flake-native builds.
 * any additional missing dependencies that `nix-build` encounters should be fetched with `nix-prefetch-url` and added to `manual-repo.nix`.
 
 #### Keeping nix files separate from the project sources
