@@ -15,7 +15,7 @@ import scala.util.control.NonFatal
 import scala.util.Try
 
 import sbt.{uri, Credentials, Logger, ModuleID, Resolver}
-import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, PatternsBasedRepository, URLRepository, UpdateReport}
+import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, ModuleReport, PatternsBasedRepository, URLRepository, UpdateReport}
 
 import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
 import coursier.core.{Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
@@ -37,32 +37,95 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
   /** Minimal POM model to capture parents and import-scoped BOMs. */
   private object PomModel {
     final case class PomDep(groupId: String, artifactId: String, version: String, scope: String = "", `type`: String = "pom")
-    final case class Model(parents: List[PomDep], importBoms: Set[PomDep], optionalDeps: Set[PomDep])
+    final case class Model(
+        parents: List[PomDep],
+        importBoms: Set[PomDep],
+        optionalDeps: Set[PomDep],
+        versionRangeDeps: Set[PomDep],
+        properties: Map[String, String]
+    )
 
-    def parse(file: File): Model = {
+    def parse(file: File, inheritedProperties: Map[String, String] = Map.empty): Model = {
       val xml = scala.xml.XML.loadFile(file)
-      val parent = (xml \ "parent").headOption.map { p =>
+      def childText(node: scala.xml.Node, label: String): Option[String] =
+        (node \ label).headOption.map(_.text.trim).filter(_.nonEmpty)
+
+      val rawParent = (xml \ "parent").headOption.map { p =>
         PomDep(
-          (p \ "groupId").text.trim,
-          (p \ "artifactId").text.trim,
-          (p \ "version").text.trim
+          childText(p, "groupId").getOrElse(""),
+          childText(p, "artifactId").getOrElse(""),
+          childText(p, "version").getOrElse("")
         )
-      }.toList
-      val deps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map { d =>
+      }
+      val rawProperties =
+        (xml \ "properties").headOption
+          .map(_.child.collect { case elem: scala.xml.Elem if elem.text.trim.nonEmpty => elem.label -> elem.text.trim }.toMap)
+          .getOrElse(Map.empty[String, String])
+      val projectProperties =
+        Map(
+          "project.groupId" -> childText(xml, "groupId").orElse(rawParent.map(_.groupId)),
+          "pom.groupId" -> childText(xml, "groupId").orElse(rawParent.map(_.groupId)),
+          "project.artifactId" -> childText(xml, "artifactId"),
+          "pom.artifactId" -> childText(xml, "artifactId"),
+          "project.version" -> childText(xml, "version").orElse(rawParent.map(_.version)),
+          "pom.version" -> childText(xml, "version").orElse(rawParent.map(_.version))
+        ).collect { case (key, Some(value)) if value.nonEmpty => key -> value }
+      val properties = resolveProperties(inheritedProperties ++ rawProperties ++ projectProperties)
+
+      def interpolate(value: String): String =
+        propertyPattern.replaceAllIn(
+          value,
+          m => java.util.regex.Matcher.quoteReplacement(properties.getOrElse(m.group(1), m.matched))
+        )
+
+      def parseDep(d: scala.xml.Node): PomDep =
         PomDep(
-          (d \ "groupId").text.trim,
-          (d \ "artifactId").text.trim,
-          (d \ "version").text.trim,
-          scope = (d \ "scope").text.trim,
-          `type` = (d \ "type").text.trim match {
+          interpolate(childText(d, "groupId").getOrElse("")),
+          interpolate(childText(d, "artifactId").getOrElse("")),
+          interpolate(childText(d, "version").getOrElse("")),
+          scope = interpolate(childText(d, "scope").getOrElse("")),
+          `type` = interpolate(childText(d, "type").getOrElse("")) match {
             case "" => "pom"
             case other => other
           }
         )
-      }.toSet
-      val importBoms = deps.filter(d => d.scope == "import" && d.`type` == "pom")
-      val optionalDeps = deps.filter(d => d.scope == "optional" || (d.scope.isEmpty && d.`type` == "pom"))
-      Model(parent, importBoms, optionalDeps)
+
+      val parent = rawParent.map { p =>
+        p.copy(
+          groupId = interpolate(p.groupId),
+          artifactId = interpolate(p.artifactId),
+          version = interpolate(p.version)
+        )
+      }.toList
+      val managedDeps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map(parseDep).toSet
+      val directDeps = (xml \ "dependencies" \ "dependency").map(parseDep).toSet
+      val deps = managedDeps ++ directDeps
+      val importBoms = managedDeps.filter(d => d.scope == "import" && d.`type` == "pom")
+      val optionalDeps =
+        deps.filter(d => d.scope == "optional" || (d.scope.isEmpty && d.`type` == "pom"))
+      val versionRangeDeps = deps.filter(d => isVersionRange(d.version))
+      Model(parent, importBoms, optionalDeps, versionRangeDeps, properties)
+    }
+
+    private val propertyPattern = "\\$\\{([^}]+)\\}".r
+
+    private def isVersionRange(version: String): Boolean =
+      version.startsWith("[") || version.startsWith("(")
+
+    private def resolveProperties(properties: Map[String, String]): Map[String, String] = {
+      @annotation.tailrec
+      def loop(current: Map[String, String], remaining: Int): Map[String, String] = {
+        val next = current.map { case (key, value) =>
+          key -> propertyPattern.replaceAllIn(
+            value,
+            m => java.util.regex.Matcher.quoteReplacement(current.getOrElse(m.group(1), m.matched))
+          )
+        }
+        if (next == current || remaining <= 0) next
+        else loop(next, remaining - 1)
+      }
+
+      loop(properties, 8)
     }
   }
 
@@ -100,6 +163,8 @@ class CoursierArtifactFetcher(
 ) {
 
   private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
+  private val pomModelCache = scala.collection.mutable.Map.empty[String, PomModel.Model]
+  private val pomAncestorCache = scala.collection.mutable.Map.empty[String, Set[NixArtifact]]
   private val ivyLocalResolver: Resolver =
     Resolver.file(
       "sbtix-ivy-local",
@@ -185,21 +250,52 @@ class CoursierArtifactFetcher(
   def fromUpdateReport(report: UpdateReport): (Set[NixRepo], Set[NixArtifact]) = {
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
-    val artifacts =
+    val moduleReports =
       report.configurations
         .flatMap(_.modules)
         .filterNot(_.evicted)
-        .flatMap { moduleReport =>
-          moduleReport.artifacts.flatMap { case (artifact, file) =>
-            artifact.url.toSeq.flatMap { url =>
-              lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
-            }
+
+    val reportArtifacts =
+      moduleReports.flatMap { moduleReport =>
+        moduleReport.artifacts.flatMap { case (artifact, file) =>
+          artifact.url.toSeq.flatMap { url =>
+            lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
           }
         }
+      }
+
+    val modulePomArtifacts =
+      moduleReports.flatMap { moduleReport =>
+        cachedModulePoms(moduleReport.module, repoDescriptors).flatMap { case (url, file) =>
+          lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
+        }
+      }
+
+    val classifierArtifacts =
+      lockUpdateReportClassifiers(moduleReports, repoDescriptors)
+
+    val artifacts =
+      (reportArtifacts ++ modulePomArtifacts ++ classifierArtifacts)
         .toSet
 
     SbtixDebug.info(logger) {
-      s"[SBTIX_DEBUG] Locked ${artifacts.size} artifacts from already-resolved sbt plugin update report"
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} artifacts from already-resolved update report"
+    }
+    (nixRepos, artifacts)
+  }
+
+  def lockModulePoms(modules: Set[ModuleID]): (Set[NixRepo], Set[NixArtifact]) = {
+    val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
+    val nixRepos = repoDescriptors.map(_.repo).toSet
+    val artifacts =
+      modules.flatMap { module =>
+        cachedModulePoms(module, repoDescriptors).flatMap { case (url, file) =>
+          lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
+        }
+      }
+
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} cached module POM artifacts"
     }
     (nixRepos, artifacts)
   }
@@ -763,6 +859,80 @@ class CoursierArtifactFetcher(
     expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
   }
 
+  private def lockUpdateReportClassifiers(
+      moduleReports: Seq[ModuleReport],
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[NixArtifact] = {
+    val classifiers = artifactClassifiers.distinct
+    if (classifiers.isEmpty) Set.empty[NixArtifact]
+    else {
+      // The update report is the resolved module/version graph. Use it only to choose
+      // coordinates; every classifier artifact is fetched and recorded with a sha256 so
+      // the generated Nix expression remains content-verified.
+      val candidateUrls =
+        moduleReports
+          .flatMap(_.artifacts)
+          .flatMap { case (artifact, _) =>
+            artifact.url.toSeq.flatMap(url => classifierUrls(url.toString, classifiers))
+          }
+          .toSet
+
+      val artifacts: Set[NixArtifact] =
+        candidateUrls.flatMap { url =>
+          downloadArtifact(artifactForUrl(url))
+            .map(file => lockCachedArtifact(url, file, repoDescriptors))
+            .getOrElse(Set.empty[NixArtifact])
+        }
+
+      SbtixDebug.info(logger) {
+        s"[SBTIX_DEBUG] Locked ${artifacts.size} classifier artifacts from update-report modules"
+      }
+      artifacts
+    }
+  }
+
+  private def classifierUrls(url: String, classifiers: Seq[String]): Set[String] = {
+    val cleanUrl = url.takeWhile(ch => ch != '?' && ch != '#')
+    if (!shouldLockReportArtifact(cleanUrl) || !cleanUrl.endsWith(".jar")) Set.empty[String]
+    else {
+      val slash = cleanUrl.lastIndexOf('/')
+      if (slash < 0) Set.empty[String]
+      else {
+        val dir = cleanUrl.substring(0, slash + 1)
+        val file = cleanUrl.substring(slash + 1)
+        val base = file.stripSuffix(".jar")
+        classifiers
+          .filterNot(classifier => base.endsWith(s"-$classifier"))
+          .map { classifier =>
+            val classifierDir = ivyClassifierDirectory(dir, classifier).getOrElse(dir)
+            s"$classifierDir$base-$classifier.jar"
+          }
+          .toSet
+      }
+    }
+  }
+
+  private def ivyClassifierDirectory(dir: String, classifier: String): Option[String] = {
+    if (dir.endsWith("/jars/")) {
+      val artifactType = classifier match {
+        case "sources" => "srcs"
+        case "javadoc" => "docs"
+        case other => s"${other}s"
+      }
+      Some(dir.stripSuffix("/jars/") + s"/$artifactType/")
+    } else None
+  }
+
+  private def artifactForUrl(url: String): CArtifact =
+    CArtifact(
+      url = url,
+      checksumUrls = Map.empty[String, String],
+      extra = Map.empty[String, CArtifact],
+      changing = false,
+      optional = true,
+      authentication = None
+    )
+
   private def cachedMavenPom(
       module: ModuleID,
       artifactUrl: String,
@@ -776,6 +946,18 @@ class CoursierArtifactFetcher(
 
     (Set(moduleUrl) ++ artifactUrlPom.toSet)
       .flatMap(url => cachedFileForUrl(url).filter(_.isFile).map(file => (url, file)))
+  }
+
+  private def cachedModulePoms(
+      module: ModuleID,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] = {
+    val modulePath =
+      s"${module.organization.replace('.', '/')}/${module.name}/${module.revision}/${module.name}-${module.revision}.pom"
+    repoDescriptors.flatMap { descriptor =>
+      val url = descriptor.normalizedRoot + modulePath
+      cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+    }.toSet
   }
 
   private def pomUrlFromArtifactUrl(module: ModuleID, artifactUrl: String): Option[String] = {
@@ -797,23 +979,96 @@ class CoursierArtifactFetcher(
       repoDescriptors: Seq[RepoDescriptor],
       seen: Set[String] = Set.empty
   ): Set[NixArtifact] = {
-    val pom = PomModel.parse(pomFile)
-    val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
+    if (seen.isEmpty)
+      pomAncestorCache.getOrElseUpdate(pomFile.getCanonicalPath, collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen))
+    else
+      collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen)
+  }
+
+  private def collectCachedPomAncestorsUncached(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): Set[NixArtifact] = {
+    val pom = cachedPomModel(pomFile, repoDescriptors, seen)
     val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
-    candidates.flatMap { pomDep =>
-      val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
-      val path =
-        s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension"
-      val url = descriptor.normalizedRoot + path
-      if (seen(url)) Set.empty[NixArtifact]
-      else {
-        cachedFileForUrl(url).filter(_.isFile).map { file =>
+    val pomArtifacts = candidates.flatMap { pomDep =>
+      cachedPomCandidates(pomDep, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++
             (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url) else Set.empty)
-        }.getOrElse(Set.empty)
       }
     }.toSet
+    val metadataArtifacts =
+      pom.versionRangeDeps.flatMap { pomDep =>
+        cachedMavenMetadataCandidates(pomDep, repoDescriptors).flatMap { case (url, file) =>
+          lockCachedArtifact(url, file, repoDescriptors)
+        }
+      }
+    pomArtifacts ++ metadataArtifacts
   }
+
+  private def cachedPomModel(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): PomModel.Model =
+    pomModelCache.getOrElseUpdate(pomFile.getCanonicalPath, parsePomWithInheritedProperties(pomFile, repoDescriptors, seen))
+
+  private def parsePomWithInheritedProperties(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): PomModel.Model = {
+    val firstPass = PomModel.parse(pomFile)
+    val inheritedProperties =
+      firstPass.parents.flatMap { parent =>
+        cachedPomCandidates(parent, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
+          cachedPomModel(file, repoDescriptors, seen + url).properties
+        }
+      }.toMap
+    if (inheritedProperties.isEmpty) firstPass
+    else PomModel.parse(pomFile, inheritedProperties)
+  }
+
+  private def cachedPomCandidates(
+      pomDep: PomModel.PomDep,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] =
+    pomPath(pomDep).map { path =>
+      repoDescriptors.flatMap { descriptor =>
+        val url = descriptor.normalizedRoot + path
+        cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+      }.toSet
+    }.getOrElse(Set.empty)
+
+  private def cachedMavenMetadataCandidates(
+      pomDep: PomModel.PomDep,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] =
+    mavenMetadataPath(pomDep).map { path =>
+      repoDescriptors.flatMap { descriptor =>
+        val url = descriptor.normalizedRoot + path
+        cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+      }.toSet
+    }.getOrElse(Set.empty)
+
+  private def pomPath(pomDep: PomModel.PomDep): Option[String] = {
+    val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
+    val parts = Seq(pomDep.groupId, pomDep.artifactId, pomDep.version, extension)
+    if (parts.forall(part => part.nonEmpty && !part.contains("$")) && !isVersionRange(pomDep.version))
+      Some(s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension")
+    else None
+  }
+
+  private def mavenMetadataPath(pomDep: PomModel.PomDep): Option[String] = {
+    val parts = Seq(pomDep.groupId, pomDep.artifactId)
+    if (parts.forall(part => part.nonEmpty && !part.contains("$")) && isVersionRange(pomDep.version))
+      Some(s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/maven-metadata.xml")
+    else None
+  }
+
+  private def isVersionRange(version: String): Boolean =
+    version.startsWith("[") || version.startsWith("(")
 
   private def cachedFileForUrl(url: String): Option[File] =
     Try(new URI(url)).toOption.flatMap { uri =>
@@ -826,20 +1081,9 @@ class CoursierArtifactFetcher(
 
   /** Parse a POM and lock any parent POM and imported BOMs (scope=import, type=pom). */
   private def collectPomAncestors(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor]): Set[NixArtifact] = {
-    downloadArtifact(artifact).map { file =>
-      val pom = PomModel.parse(file)
-      val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
-      candidates.flatMap { pomDep =>
-        val path = s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.${if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"}"
-        val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
-        val url = descriptor.normalizedRoot + path
-        downloadArtifact(CArtifact(url)).toSeq.flatMap { f =>
-          val relative = computeRelativePath(url, descriptor)
-          val sha256 = computeSha256(f)
-          expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
-        }
-      }.toSet
-    }.getOrElse(Set.empty)
+    downloadArtifact(artifact)
+      .map(file => collectCachedPomAncestors(file, repoDescriptors))
+      .getOrElse(Set.empty)
   }
 
   private val ivyVariablePattern = "\\$\\{([^}]+)\\}".r

@@ -633,8 +633,11 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     def resolveDependencies(fetch: DependencyFetch): FetchResult =
       FetchResult.fromResolved(fetcher(fetch.artifactClassifiers)(fetch.dependencies))
 
-    def lockUpdateReport(report: UpdateReport): FetchResult =
-      FetchResult.fromLocked(fetcher(Seq.empty[String]).fromUpdateReport(report))
+    def lockUpdateReport(report: UpdateReport, artifactClassifiers: Seq[String]): FetchResult =
+      FetchResult.fromLocked(fetcher(artifactClassifiers).fromUpdateReport(report))
+
+    def lockModulePoms(modules: Set[ModuleID]): FetchResult =
+      FetchResult.fromLocked(fetcher(Seq.empty[String]).lockModulePoms(modules))
   }
 
   private[sbtix] sealed trait PluginFetchPlan
@@ -704,21 +707,15 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   ): PluginFetchPlan = {
     val (scalafmtPluginModuleIds, regularPluginModuleIds) =
       pluginModuleIds.partition(isSbtScalafmtPlugin)
-    val dependencyFetches =
-      updateReport match {
-        case Some(_) if scalafmtPluginModuleIds.nonEmpty =>
-          pluginDependencyFetchPlan(regularPluginModuleIds, Set.empty, artifactClassifiers)
-        case _ =>
-          pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers)
-      }
-
-    (pluginModuleIds.isEmpty, scalafmtPluginModuleIds.nonEmpty, updateReport) match {
-      case (true, _, _) =>
+    (pluginModuleIds.isEmpty, updateReport) match {
+      case (true, _) =>
         NoPluginFetch
-      case (_, true, Some(report)) =>
-        PluginReportAndDependencyFetches(report, dependencyFetches)
+      case (_, Some(report)) =>
+        PluginReportAndDependencyFetches(report, Seq.empty)
       case _ =>
-        PluginDependencyFetches(dependencyFetches)
+        PluginDependencyFetches(
+          pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers)
+        )
     }
   }
 
@@ -745,15 +742,16 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
 
   private def fetchPluginPlan(
       plan: PluginFetchPlan,
-      config: FetcherConfig
+      config: FetcherConfig,
+      artifactClassifiers: Seq[String]
   ): FetchResult =
     plan match {
       case NoPluginFetch =>
         FetchResult.empty
       case PluginReportAndDependencyFetches(report, fetches) =>
-        val result = FetchResult.combine(Seq(config.lockUpdateReport(report), runFetches(fetches, config)))
+        val result = FetchResult.combine(Seq(config.lockUpdateReport(report, artifactClassifiers), runFetches(fetches, config)))
         SbtixDebug.info(config.log) {
-          s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report and declared plugin modules because sbt-scalafmt is present"
+          s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report with content hashes"
         }
         // URL aliases can still map to the same generated Nix key; NixWriter2 owns final write-time deduplication.
         result
@@ -785,7 +783,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       )
     val result = fetchPluginPlan(
       pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),
-      config
+      config,
+      artifactClassifiers
     )
     if (result.hasLockedArtifacts) Some((scalaVersion, result.repos, result.artifacts))
     else None
@@ -852,20 +851,33 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       val scalafmtRuntimeDeps =
         scalafmtToolingDependencies(rootBaseDirectory, pluginModuleIds, log)
 
-      // sbt itself downloads some "tooling" artifacts during compilation, even
-      // when they are not declared as normal project/library dependencies. Lock
-      // them in repo.nix so Nix sandbox builds stay offline.
-      val dependencies: Set[Dependency] =
+      val projectUpdateReport = update.value
+
+      val declaredProjectModules =
         filterLockableModules(
           (Compile / allDependencies).value,
           log,
           "sbtixGenerate"
-        ).map(Dependency(_)).toSet ++ sbtToolingDependencies(scalaVer, log)
+        ).toSet
 
-      val fetchResult = runFetches(
-        dependencyFetchPlan(dependencies, scalafmtRuntimeDeps, sbtixArtifactClassifiers.value),
-        FetcherConfig(log, projectResolvers, projectCredentials, scalaVer, scalaBinaryVersion.value)
-      )
+      // sbt itself downloads some "tooling" artifacts during compilation, even
+      // when they are not declared as normal project/library dependencies. Lock
+      // them in repo.nix so Nix sandbox builds stay offline.
+      val toolingDependencies: Set[Dependency] =
+        sbtToolingDependencies(scalaVer, log)
+
+      val fetcherConfig = FetcherConfig(log, projectResolvers, projectCredentials, scalaVer, scalaBinaryVersion.value)
+      val fetchResult =
+        FetchResult.combine(
+          Seq(
+            fetcherConfig.lockUpdateReport(projectUpdateReport, sbtixArtifactClassifiers.value),
+            fetcherConfig.lockModulePoms(declaredProjectModules),
+            runFetches(
+              dependencyFetchPlan(toolingDependencies, scalafmtRuntimeDeps, sbtixArtifactClassifiers.value),
+              fetcherConfig
+            )
+          )
+        )
 
       val repos = fetchResult.repos
       val artifacts = fetchResult.artifacts
