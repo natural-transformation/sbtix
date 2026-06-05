@@ -605,7 +605,7 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     }
   }
 
-  private final case class DependencyFetch(
+  private[sbtix] final case class DependencyFetch(
       dependencies: Set[Dependency],
       artifactClassifiers: Seq[String],
       context: Option[String] = None
@@ -637,10 +637,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       FetchResult.fromLocked(fetcher(Seq.empty[String]).fromUpdateReport(report))
   }
 
-  private sealed trait PluginFetchPlan
-  private case object NoPluginFetch extends PluginFetchPlan
-  private final case class PluginReportFetch(report: UpdateReport) extends PluginFetchPlan
-  private final case class PluginDependencyFetches(fetches: Seq[DependencyFetch]) extends PluginFetchPlan
+  private[sbtix] sealed trait PluginFetchPlan
+  private[sbtix] case object NoPluginFetch extends PluginFetchPlan
+  private[sbtix] final case class PluginReportAndDependencyFetches(
+      report: UpdateReport,
+      fetches: Seq[DependencyFetch]
+  ) extends PluginFetchPlan
+  private[sbtix] final case class PluginDependencyFetches(fetches: Seq[DependencyFetch]) extends PluginFetchPlan
 
   private def nonEmptyFetches(fetches: DependencyFetch*): Seq[DependencyFetch] =
     fetches.filter(_.dependencies.nonEmpty)
@@ -694,21 +697,28 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       "sbtBinaryVersion" -> sbtBinaryVersion
     )
 
-  private def pluginFetchPlan(
+  private[sbtix] def pluginFetchPlan(
       pluginModuleIds: Set[ModuleID],
       updateReport: Option[UpdateReport],
       artifactClassifiers: Seq[String]
   ): PluginFetchPlan = {
     val (scalafmtPluginModuleIds, regularPluginModuleIds) =
       pluginModuleIds.partition(isSbtScalafmtPlugin)
+    val dependencyFetches =
+      updateReport match {
+        case Some(_) if scalafmtPluginModuleIds.nonEmpty =>
+          pluginDependencyFetchPlan(regularPluginModuleIds, Set.empty, artifactClassifiers)
+        case _ =>
+          pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers)
+      }
 
     (pluginModuleIds.isEmpty, scalafmtPluginModuleIds.nonEmpty, updateReport) match {
       case (true, _, _) =>
         NoPluginFetch
       case (_, true, Some(report)) =>
-        PluginReportFetch(report)
+        PluginReportAndDependencyFetches(report, dependencyFetches)
       case _ =>
-        PluginDependencyFetches(pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers))
+        PluginDependencyFetches(dependencyFetches)
     }
   }
 
@@ -740,11 +750,12 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     plan match {
       case NoPluginFetch =>
         FetchResult.empty
-      case PluginReportFetch(report) =>
-        val result = config.lockUpdateReport(report)
+      case PluginReportAndDependencyFetches(report, fetches) =>
+        val result = FetchResult.combine(Seq(config.lockUpdateReport(report), runFetches(fetches, config)))
         SbtixDebug.info(config.log) {
-          s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report because sbt-scalafmt is present"
+          s"[SBTIX_DEBUG] Locked sbt plugin artifacts from already-resolved update report and declared plugin modules because sbt-scalafmt is present"
         }
+        // URL aliases can still map to the same generated Nix key; NixWriter2 owns final write-time deduplication.
         result
       case PluginDependencyFetches(fetches) =>
         runFetches(fetches, config)

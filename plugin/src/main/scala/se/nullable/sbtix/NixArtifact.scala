@@ -16,7 +16,7 @@ case class NixArtifact(
   url: String,
   sha256: String
 ) {
-  private val entryName = {
+  val entryName: String = {
     val cleanPath = if (relativePath.startsWith("/")) relativePath.drop(1) else relativePath
     s"$repoName/$cleanPath"
   }
@@ -65,4 +65,4 @@ object NixArtifact {
     val artifactId = url.split("/").takeRight(1).head
     NixArtifact("nix-public", artifactId, url, checksum(file))
   }
-} 
+}

@@ -4,5 +4,6 @@ sys.props.get("plugin.version") match {
 }
 
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.6")
+addSbtPlugin("io.spray" % "sbt-revolver" % "0.10.0")
 
 resolvers += Resolver.sbtPluginRepo("releases")
