@@ -4,6 +4,19 @@ package se.nullable.sbtix
  * A simplified helper for writing Nix expressions
  */
 object NixWriter2 {
+  private def fileName(path: String): String =
+    path.takeWhile(ch => ch != '?' && ch != '#').split('/').lastOption.getOrElse("")
+
+  private def chooseArtifactForKey(artifacts: Seq[NixArtifact]): NixArtifact =
+    artifacts
+      .sortBy { artifact =>
+        val urlFileMatchesPath =
+          fileName(artifact.url) == fileName(artifact.relativePath)
+        // If no URL filename matches the offline path, keep the fallback deterministic.
+        (if (urlFileMatchesPath) 0 else 1, artifact.url, artifact.sha256)
+      }
+      .head
+
   /**
    * Creates a Nix expression for the repository
    */
@@ -40,6 +53,10 @@ object NixWriter2 {
     val sortedArtifacts =
       artifacts.toSeq
         .filterNot(_.url.startsWith("file:"))
+        .groupBy(_.entryName)
+        .values
+        .map(chooseArtifactForKey)
+        .toSeq
         .sortBy(a => (a.repoName, a.relativePath))
     if (sortedArtifacts.nonEmpty) {
       builder.append(sortedArtifacts.map(_.toNix).mkString("\n"))
