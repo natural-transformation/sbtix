@@ -12,30 +12,12 @@ import scala.io.Source
 import sbt.io.syntax._
 import coursier.core.{Dependency => CoursierDependency, Module => CoursierCoreModule, ModuleName => CoursierModuleName, Organization => CoursierOrganization}
 import sbt.plugins.JvmPlugin
-import sbt.IO.{copyFile, write}
 
 /**
  * The main plugin for Sbtix, which provides Nix integration for SBT.
  */
 object SbtixPlugin extends AutoPlugin {
   import se.nullable.sbtix.SbtixHashes._
-  private def findExpectedFile(baseDir: File, relativeNames: Seq[String]): Option[File] = {
-    @annotation.tailrec
-    def loop(dir: File): Option[File] = {
-      if (dir == null) None
-      else {
-        val expectedDir = new File(dir, "expected")
-        val found = relativeNames.collectFirst {
-          case name if new File(expectedDir, name).exists() => new File(expectedDir, name)
-        }
-        found match {
-          case some @ Some(_) => some
-          case None => loop(dir.getParentFile)
-        }
-      }
-    }
-    loop(baseDir)
-  }
 
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val SampleDefaultTemplateResource = "/sbtix/default.nix.template"
@@ -708,16 +690,19 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val (scalafmtPluginModuleIds, regularPluginModuleIds) =
       pluginModuleIds.partition(isSbtScalafmtPlugin)
     (pluginModuleIds.isEmpty, updateReport) match {
+      case (_, Some(report)) if updateReportHasModules(report) =>
+        PluginReportAndDependencyFetches(report, Seq.empty)
       case (true, _) =>
         NoPluginFetch
-      case (_, Some(report)) =>
-        PluginReportAndDependencyFetches(report, Seq.empty)
       case _ =>
         PluginDependencyFetches(
           pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers)
         )
     }
   }
+
+  private[sbtix] def updateReportHasModules(report: UpdateReport): Boolean =
+    report.configurations.exists(_.modules.exists(!_.evicted))
 
   private def pluginDependencyFetchPlan(
       regularPluginModuleIds: Set[ModuleID],
@@ -900,42 +885,23 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Generate the Nix expressions and write to files
       val currentBase = baseDirectory.value
       val repoFile = new File(currentBase, "repo.nix")
-      val repoCandidateOrder =
-        if (new File(currentBase, "build.sbt").exists()) Seq("repo.nix", "project-repo.nix")
-        else Seq("project-repo.nix", "repo.nix")
-      
-      // Copy the expected file for repo.nix if it exists
-      findExpectedFile(currentBase, repoCandidateOrder) match {
-        case Some(expectedRepoFile) =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected repo.nix from ${expectedRepoFile.getAbsolutePath}" }
-          IO.copyFile(expectedRepoFile, repoFile)
-        case None =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Expected repo.nix not found for ${baseDirectory.value}, generating file" }
-          IO.write(repoFile, NixWriter2(repos, artifacts, scalaVer, sbtVer))
-      }
+
+      IO.write(repoFile, NixWriter2(repos, artifacts, scalaVer, sbtVer))
       log.info(s"Wrote repository definitions to ${repoFile}")
       
-      // For project/repo.nix also copy from expected if available
       val projectDir = new File(baseDirectory.value, "project")
       val projectRepoFile = new File(projectDir, "repo.nix")
       IO.createDirectory(projectDir)
       
-      // Copy the expected file for testing
-      findExpectedFile(baseDirectory.value, Seq("project-repo.nix")) match {
-        case Some(expectedProjectRepoFile) =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected project-repo.nix from ${expectedProjectRepoFile.getAbsolutePath}" }
-          IO.copyFile(expectedProjectRepoFile, projectRepoFile)
-        case None =>
-          pluginFetchResult match {
-            case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
-              SbtixDebug.info(log) {
-                s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts"
-              }
-              IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
-            case _ =>
-              SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo" }
-          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
+      pluginFetchResult match {
+        case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
+          SbtixDebug.info(log) {
+            s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts"
           }
+          IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
+        case _ =>
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo" }
+          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
       }
       
       log.info(s"Wrote plugin repository definitions to ${projectRepoFile}")

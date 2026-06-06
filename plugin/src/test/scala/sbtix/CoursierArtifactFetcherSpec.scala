@@ -41,7 +41,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     
     val dependencies = Set(
       Dependency(
-        ModuleID("com.lihaoyi", "upickle_2.12", "3.1.3")
+        ModuleID("com.lihaoyi", "upickle_2.12", "4.4.3")
       )
     )
     
@@ -50,7 +50,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger, 
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12"
     )
     
@@ -79,7 +79,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
 
     val dependencies = Set(
       Dependency(
-        ModuleID("com.typesafe", "config", "1.4.2")
+        ModuleID("com.typesafe", "config", "1.4.9")
       )
     )
 
@@ -87,7 +87,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12",
       artifactClassifiers = Seq("javadoc")
     )
@@ -114,7 +114,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12",
       artifactClassifiers = Seq.empty
     )
@@ -143,7 +143,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       Set(sbtPluginReleases),
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12"
     )
 

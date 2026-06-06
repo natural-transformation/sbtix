@@ -5,12 +5,9 @@ organization := "se.nullable.sbtix"
 version      := "1.0.3"
 
 publishTo := {
-    if (isSnapshot.value) {
-      Opts.resolver.sonatypeOssSnapshots.headOption
-    } else {
-      Some(Opts.resolver.sonatypeStaging)
-    }
-  }
+  if (isSnapshot.value) Some(Resolver.sonatypeCentralSnapshots)
+  else localStaging.value
+}
 
 
 licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
@@ -91,6 +88,6 @@ scalafmtOnCompile := false
 libraryDependencies ++= Seq(
   "io.get-coursier" %% "coursier" % "2.1.24",
   "io.get-coursier" %% "coursier-sbt-maven-repository" % "2.1.24",
-  "com.lihaoyi" %% "upickle" % "3.1.3",
-  "org.scalatest" %% "scalatest" % "3.2.18" % Test
+  "com.lihaoyi" %% "upickle" % "4.4.3",
+  "org.scalatest" %% "scalatest" % "3.2.20" % Test
 )
