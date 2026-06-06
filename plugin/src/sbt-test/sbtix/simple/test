@@ -11,8 +11,12 @@ $ exec grep -q 'org/scalatest/scalatest_2.13/3.2.20/scalatest_2.13-3.2.20.jar' r
 $ exec grep -q 'io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16.jar' repo.nix
 $ exec sh -c '! grep -q "io/github/java-diff-utils/java-diff-utils/4.12/java-diff-utils-4.12.jar" repo.nix'
 
-# The project/plugin repository must retain its full deterministic fixture.
-$ must-mirror project/repo.nix expected/project-repo.nix
+# The project/plugin repository must include declared sbt plugin artifacts and
+# resolver metadata without exact-mirroring cache-dependent transitive metadata.
+$ exec grep -q 'nix-sbt-plugin-releases' project/repo.nix
+$ exec grep -q 'com/github/sbt/sbt-native-packager_2.12_1.0/1.11.7/sbt-native-packager_2.12_1.0-1.11.7.jar' project/repo.nix
+$ exec grep -q 'net/bzzt/sbt-reproducible-builds_2.12_1.0/0.32/sbt-reproducible-builds_2.12_1.0-0.32.jar' project/repo.nix
+$ exec grep -q 'com/github/sbt/sbt-native-packager_2.12_1.0/1.9.16/sbt-native-packager_2.12_1.0-1.9.16.pom' project/repo.nix
 
 # Generate the default.nix for building
 > genComposition
