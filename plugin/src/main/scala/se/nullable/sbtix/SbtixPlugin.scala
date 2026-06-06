@@ -393,13 +393,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private lazy val sampleDefaultTemplate: String =
     loadSampleDefaultTemplate()
   
-  private def pluginFilesFrom(baseDir: File): List[File] = {
+  private[sbtix] def pluginFilesFrom(baseDir: File): List[File] = {
     @annotation.tailrec
     def collect(dir: File, acc: List[File]): List[File] = {
       if (dir == null) acc
       else {
         val candidate = new File(dir, "project/plugins.sbt")
-        val nextAcc = if (candidate.exists()) candidate :: acc else acc
+        val nextAcc = if (candidate.exists()) acc :+ candidate else acc
         collect(dir.getParentFile, nextAcc)
       }
     }
@@ -798,14 +798,23 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         credentials,
         scalaVersion,
         scalaBinaryVersion,
-        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion),
-        lockPomDependencyArtifacts = true
+        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion)
       )
-    val result = fetchPluginPlan(
+    val resolvedPluginArtifacts = fetchPluginPlan(
       pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),
       config,
       artifactClassifiers
     )
+    val rootPomArtifacts =
+      if (pluginModuleIds.isEmpty) FetchResult.empty
+      else {
+        // sbt's plugin loader can use direct compile/runtime dependencies from a
+        // declared plugin POM even when they are absent from the update report.
+        // Keep that expansion scoped to plugin roots instead of treating every
+        // transitive POM as a new classpath root.
+        config.copy(lockPomDependencyArtifacts = true).lockModulePoms(pluginModuleIds)
+      }
+    val result = FetchResult.combine(Seq(resolvedPluginArtifacts, rootPomArtifacts))
     if (result.hasLockedArtifacts) Some((scalaVersion, result.repos, result.artifacts))
     else None
   }

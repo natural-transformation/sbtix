@@ -9,9 +9,17 @@
   };
 
   "artifacts" = {
+    "nix-public/io/github/java-diff-utils/java-diff-utils-parent/4.12/java-diff-utils-parent-4.12.pom" = {
+      url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils-parent/4.12/java-diff-utils-parent-4.12.pom";
+      sha256 = "D811CF9F118CC2CAD130C9427AD55C174D4C0A6F1A00AC1AE1C9BCBEC5C44B19";
+    };
     "nix-public/io/github/java-diff-utils/java-diff-utils-parent/4.16/java-diff-utils-parent-4.16.pom" = {
       url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils-parent/4.16/java-diff-utils-parent-4.16.pom";
       sha256 = "A4344DA58E53A8E8C57BE19E923BADF24B27DD42B07DE6D446D2A659A456509A";
+    };
+    "nix-public/io/github/java-diff-utils/java-diff-utils/4.12/java-diff-utils-4.12.pom" = {
+      url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.12/java-diff-utils-4.12.pom";
+      sha256 = "C26E097EDC8EC6805D1319817D23D4E496CC1015CC55DC5202112D8F6A9165FC";
     };
     "nix-public/io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16-sources.jar" = {
       url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16-sources.jar";
@@ -25,9 +33,21 @@
       url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16.pom";
       sha256 = "434D598A1E1813111385235161627A4C4EBD62134F7054428D3E202B32CF39DE";
     };
+    "nix-public/net/java/dev/jna/jna/5.9.0/jna-5.9.0.pom" = {
+      url = "https://repo1.maven.org/maven2/net/java/dev/jna/jna/5.9.0/jna-5.9.0.pom";
+      sha256 = "6BC8B8459150B59E9598F3DAD9AD245A1EF2150D082581017184EB163E592829";
+    };
+    "nix-public/org/jline/jline-parent/3.21.0/jline-parent-3.21.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/jline/jline-parent/3.21.0/jline-parent-3.21.0.pom";
+      sha256 = "98D561914FF908EC21D8B46BEF89FB7AF824D416DFD32B1BA71FA5D4A4F4C7A0";
+    };
     "nix-public/org/jline/jline-parent/3.29.0/jline-parent-3.29.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/jline/jline-parent/3.29.0/jline-parent-3.29.0.pom";
       sha256 = "7922EFD3D870A7D7AE03B196C300E35C5DE0228E59A5B012AEA641E36D79928E";
+    };
+    "nix-public/org/jline/jline/3.21.0/jline-3.21.0.pom" = {
+      url = "https://repo1.maven.org/maven2/org/jline/jline/3.21.0/jline-3.21.0.pom";
+      sha256 = "0F11A07911F2E0687E120794A67536328B61E866A953CC1EA75B796C0B926C73";
     };
     "nix-public/org/jline/jline/3.29.0/jline-3.29.0-jdk8.jar" = {
       url = "https://repo1.maven.org/maven2/org/jline/jline/3.29.0/jline-3.29.0-jdk8.jar";
@@ -60,6 +80,14 @@
     "nix-public/org/scala-lang/modules/scala-xml_2.13/2.1.0/scala-xml_2.13-2.1.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_2.13/2.1.0/scala-xml_2.13-2.1.0.pom";
       sha256 = "048282A7E5FD21C79679869E8A64EA704C7C78DD35DD202532CFDAE52CD2D118";
+    };
+    "nix-public/org/scala-lang/scala-compiler/2.13.10/scala-compiler-2.13.10.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.10/scala-compiler-2.13.10.jar";
+      sha256 = "2CD4A964EA48E78C91A2A7B19C4FC67A9868728ACE5EE966B1D498270B3C3AA7";
+    };
+    "nix-public/org/scala-lang/scala-compiler/2.13.10/scala-compiler-2.13.10.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.10/scala-compiler-2.13.10.pom";
+      sha256 = "BCD93D5C307B7CB59795D5A4D6CEF793D69BDEB332780798D5D5811426329F66";
     };
     "nix-public/org/scala-lang/scala-compiler/2.13.18/scala-compiler-2.13.18-sources.jar" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.13.18/scala-compiler-2.13.18-sources.jar";
@@ -508,6 +536,10 @@
     "nix-public/org/scalatest/scalatest_2.13/3.2.20/scalatest_2.13-3.2.20.pom" = {
       url = "https://repo1.maven.org/maven2/org/scalatest/scalatest_2.13/3.2.20/scalatest_2.13-3.2.20.pom";
       sha256 = "4D8D839105D9719F949A04A30EC99F5C2E766A59FAE6AEA65769F8CCC8E2E3F3";
+    };
+    "nix-public/org/sonatype/oss/oss-parent/9/oss-parent-9.pom" = {
+      url = "https://repo1.maven.org/maven2/org/sonatype/oss/oss-parent/9/oss-parent-9.pom";
+      sha256 = "FB40265F982548212FF82E362E59732B2187EC6F0D80182885C14EF1F982827A";
     };
   };
 }

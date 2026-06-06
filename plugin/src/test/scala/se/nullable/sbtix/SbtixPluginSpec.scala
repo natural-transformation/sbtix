@@ -6,6 +6,7 @@ import org.scalatest.OptionValues
 import sbt.ModuleID
 import sbt.librarymanagement.{ConfigRef, ConfigurationReport, ModuleReport, UpdateReport, UpdateStats}
 import java.io.File
+import java.nio.file.Files
 
 class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
 
@@ -18,6 +19,14 @@ class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
       UpdateStats(0L, 0L, 0L, cached = true),
       Map.empty
     )
+  }
+
+  private def writePluginsFile(base: File, body: String): File = {
+    val projectDir = new File(base, "project")
+    projectDir.mkdirs() shouldBe true
+    val pluginsFile = new File(projectDir, "plugins.sbt")
+    sbt.IO.write(pluginsFile, body)
+    pluginsFile
   }
 
   "pluginFetchPlan" should "use the already-resolved plugin update report without re-resolving plugin roots" in {
@@ -84,5 +93,18 @@ class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
     val scalafmtFetch = fetches.find(_.context.exists(_.contains("sbt-scalafmt plugin"))).value
     scalafmtFetch.artifactClassifiers shouldBe empty
     scalafmtFetch.dependencies.map(_.moduleId) shouldBe Set(scalafmtPlugin)
+  }
+
+  "pluginFilesFrom" should "prefer the nearest plugins.sbt when builds are nested" in {
+    val outer = Files.createTempDirectory("sbtix-outer-build").toFile
+    val inner = new File(outer, "inner")
+    inner.mkdirs() shouldBe true
+    val outerPlugins = writePluginsFile(outer, """addSbtPlugin("outer" % "plugin" % "1.0.0")""")
+    val innerPlugins = writePluginsFile(inner, """addSbtPlugin("inner" % "plugin" % "1.0.0")""")
+
+    SbtixPlugin.pluginFilesFrom(inner).map(_.getCanonicalFile) shouldBe List(
+      innerPlugins.getCanonicalFile,
+      outerPlugins.getCanonicalFile
+    )
   }
 }

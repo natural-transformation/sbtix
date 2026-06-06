@@ -187,7 +187,8 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     val resolvers = Set[Resolver](
       MavenRepository("central", "https://repo1.maven.org/maven2")
     )
-    val module = ModuleID("com.github.sbt", "sbt-native-packager_2.12_1.0", "1.11.7")
+    val module = ModuleID("com.github.sbt", "sbt-native-packager", "1.11.7")
+      .withExtraAttributes(Map("scalaVersion" -> "2.12", "sbtVersion" -> "1.0"))
 
     val fetcher = new CoursierArtifactFetcher(
       mockLogger,
@@ -195,6 +196,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       Set.empty,
       "2.12.21",
       "2.12",
+      extraIvyProps = Map("scalaBinaryVersion" -> "2.12", "sbtBinaryVersion" -> "1.0"),
       artifactClassifiers = Seq.empty,
       lockPomDependencyArtifacts = true
     )

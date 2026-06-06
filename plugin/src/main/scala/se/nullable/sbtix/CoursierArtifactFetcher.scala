@@ -187,7 +187,10 @@ class CoursierArtifactFetcher(
 
   private val effectiveResolvers: Set[Resolver] =
     if (resolvers.exists(_.name == ivyLocalResolver.name)) resolvers else resolvers + ivyLocalResolver
-  private val sbtVersionKeys = Set("sbtVersion", "e:sbtVersion")
+  private val sbtVersionKeys = Seq("sbtVersion", "e:sbtVersion")
+  private val scalaVersionKeys = Seq("scalaVersion", "e:scalaVersion")
+  private val scalaBinaryVersionAttr: Option[String] =
+    extraIvyProps.get("scalaBinaryVersion").orElse(extraIvyProps.get("scalaVersion"))
   private val sbtBinaryVersionAttr: Option[String] =
     extraIvyProps.get("sbtBinaryVersion").orElse(extraIvyProps.get("sbtVersion"))
 
@@ -310,7 +313,7 @@ class CoursierArtifactFetcher(
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
     val artifacts =
-      modules.flatMap { module =>
+      modules.flatMap(publicationVariants).flatMap { module =>
         cachedModulePoms(module, repoDescriptors).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
@@ -386,18 +389,32 @@ class CoursierArtifactFetcher(
     * both shapes so resolution can succeed regardless of repository layout.
     */
   private def expandSbtPluginDependency(dep: SbtixDependency): Set[SbtixDependency] = {
-    val mod = dep.moduleId
-    val isSbtPlugin = mod.extraAttributes.keySet.exists(sbtVersionKeys.contains)
-    if (!isSbtPlugin) Set(dep)
-    else {
-      val crossVariant =
-        sbtBinaryVersionAttr.flatMap { sbtBin =>
-          val crossName = s"${mod.name}_${scalaBinaryVersion}_${sbtBin}"
-          if (crossName == mod.name) None else Some(dep.copy(moduleId = mod.withName(crossName)))
-        }
-      Set(dep) ++ crossVariant.toSet
-    }
+    publicationVariants(dep.moduleId).map(moduleId => dep.copy(moduleId = moduleId))
   }
+
+  private def publicationVariants(module: ModuleID): Set[ModuleID] = {
+    val isSbtPlugin = module.extraAttributes.keySet.exists(sbtVersionKeys.contains)
+    val crossVariant =
+      if (!isSbtPlugin) None
+      else {
+        val scalaBin = scalaVersionKeys.flatMap(module.extraAttributes.get).headOption
+          .orElse(scalaBinaryVersionAttr)
+          .getOrElse(scalaBinaryVersion)
+        val sbtBin = sbtVersionKeys.flatMap(module.extraAttributes.get).headOption
+          .orElse(sbtBinaryVersionAttr)
+        sbtBin.flatMap { sbtBin =>
+          val crossName = s"${module.name}_${scalaBin}_${sbtBin}"
+          if (crossName == module.name) None
+          else Some(module.withName(crossName).withExtraAttributes(mavenPublicationAttributes(module)))
+        }
+      }
+    Set(module) ++ crossVariant.toSet
+  }
+
+  private def mavenPublicationAttributes(module: ModuleID): Map[String, String] =
+    module.extraAttributes.filterNot { case (key, _) =>
+      sbtVersionKeys.contains(key) || scalaVersionKeys.contains(key)
+    }
 
   private def downloadArtifact(artifact: CArtifact): Option[File] =
     FileCache[Task](location = CacheDefaults.location)
@@ -1031,33 +1048,36 @@ class CoursierArtifactFetcher(
   private def collectCachedPomAncestors(
       pomFile: File,
       repoDescriptors: Seq[RepoDescriptor],
-      seen: Set[String] = Set.empty
+      seen: Set[String] = Set.empty,
+      includeClasspathArtifacts: Boolean = lockPomDependencyArtifacts
   ): Set[NixArtifact] = {
+    val cacheKey = s"${pomFile.getCanonicalPath}|classpath=$includeClasspathArtifacts"
     if (seen.isEmpty)
-      pomAncestorCache.getOrElseUpdate(pomFile.getCanonicalPath, collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen))
+      pomAncestorCache.getOrElseUpdate(cacheKey, collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen, includeClasspathArtifacts))
     else
-      collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen)
+      collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen, includeClasspathArtifacts)
   }
 
   private def collectCachedPomAncestorsUncached(
       pomFile: File,
       repoDescriptors: Seq[RepoDescriptor],
-      seen: Set[String]
+      seen: Set[String],
+      includeClasspathArtifacts: Boolean
   ): Set[NixArtifact] = {
     val pom = cachedPomModel(pomFile, repoDescriptors, seen)
     val classpathArtifacts =
-      if (lockPomDependencyArtifacts) pom.classpathDeps.flatMap(dependencyLockCandidates)
-      else Set.empty[PomModel.PomDep]
+      if (includeClasspathArtifacts) pom.classpathDeps.flatMap(dependencyLockCandidates).map((_, true))
+      else Set.empty[(PomModel.PomDep, Boolean)]
     val candidates =
-      pom.parents ++
-        pom.importBoms ++
-        pom.metadataDeps ++
+      pom.parents.map((_, false)) ++
+        pom.importBoms.map((_, false)) ++
+        pom.metadataDeps.map((_, false)) ++
         classpathArtifacts ++
-        pom.providedDeps.flatMap(dependencyLockCandidates)
-    candidates.flatMap { pomDep =>
-      cachedPomCandidates(pomDep, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
+        pom.providedDeps.flatMap(dependencyLockCandidates).map((_, true))
+    candidates.flatMap { case (pomDep, fetchIfMissing) =>
+      pomDependencyCandidates(pomDep, repoDescriptors, fetchIfMissing).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++
-            (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url) else Set.empty)
+            (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url, includeClasspathArtifacts = false) else Set.empty)
       }
     }.toSet
   }
@@ -1108,10 +1128,20 @@ class CoursierArtifactFetcher(
       pomDep: PomModel.PomDep,
       repoDescriptors: Seq[RepoDescriptor]
   ): Set[(String, File)] =
+    pomDependencyCandidates(pomDep, repoDescriptors, fetchIfMissing = false)
+
+  private def pomDependencyCandidates(
+      pomDep: PomModel.PomDep,
+      repoDescriptors: Seq[RepoDescriptor],
+      fetchIfMissing: Boolean
+  ): Set[(String, File)] =
     pomPath(pomDep).map { path =>
       repoDescriptors.flatMap { descriptor =>
         val url = descriptor.normalizedRoot + path
-        cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+        cachedFileForUrl(url)
+          .filter(_.isFile)
+          .orElse(if (fetchIfMissing && descriptor.normalizedRoot == DefaultPublicRoot) downloadArtifact(artifactForUrl(url)) else None)
+          .map(file => (url, file))
       }.toSet
     }.getOrElse(Set.empty)
 
