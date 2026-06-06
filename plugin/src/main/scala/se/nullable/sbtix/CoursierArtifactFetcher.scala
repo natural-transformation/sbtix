@@ -1025,19 +1025,12 @@ class CoursierArtifactFetcher(
   ): Set[NixArtifact] = {
     val pom = cachedPomModel(pomFile, repoDescriptors, seen)
     val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
-    val pomArtifacts = candidates.flatMap { pomDep =>
+    candidates.flatMap { pomDep =>
       cachedPomCandidates(pomDep, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++
             (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url) else Set.empty)
       }
     }.toSet
-    val metadataArtifacts =
-      pom.versionRangeDeps.flatMap { pomDep =>
-        cachedMavenMetadataCandidates(pomDep, repoDescriptors).flatMap { case (url, file) =>
-          lockCachedArtifact(url, file, repoDescriptors)
-        }
-      }
-    pomArtifacts ++ metadataArtifacts
   }
 
   private def cachedPomModel(
@@ -1074,29 +1067,11 @@ class CoursierArtifactFetcher(
       }.toSet
     }.getOrElse(Set.empty)
 
-  private def cachedMavenMetadataCandidates(
-      pomDep: PomModel.PomDep,
-      repoDescriptors: Seq[RepoDescriptor]
-  ): Set[(String, File)] =
-    mavenMetadataPath(pomDep).map { path =>
-      repoDescriptors.flatMap { descriptor =>
-        val url = descriptor.normalizedRoot + path
-        cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
-      }.toSet
-    }.getOrElse(Set.empty)
-
   private def pomPath(pomDep: PomModel.PomDep): Option[String] = {
     val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
     val parts = Seq(pomDep.groupId, pomDep.artifactId, pomDep.version, extension)
     if (parts.forall(part => part.nonEmpty && !part.contains("$")) && !isVersionRange(pomDep.version))
       Some(s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension")
-    else None
-  }
-
-  private def mavenMetadataPath(pomDep: PomModel.PomDep): Option[String] = {
-    val parts = Seq(pomDep.groupId, pomDep.artifactId)
-    if (parts.forall(part => part.nonEmpty && !part.contains("$")) && isVersionRange(pomDep.version))
-      Some(s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/maven-metadata.xml")
     else None
   }
 

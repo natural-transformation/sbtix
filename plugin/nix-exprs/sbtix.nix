@@ -113,6 +113,51 @@ in rec {
         (let
             parentDirs = filePath:
                 concatStringsSep "/" (init (splitString "/" filePath));
+            synthesizeMavenMetadata = ''
+              for repoRoot in "$out"/*; do
+                [ -d "$repoRoot" ] || continue
+                [ "$(basename "$repoRoot")" != "cas" ] || continue
+                find "$repoRoot" -type d | while IFS= read -r moduleDir; do
+                  module="$(basename "$moduleDir")"
+                  versions="$(
+                    for versionDir in "$moduleDir"/*; do
+                      [ -d "$versionDir" ] || continue
+                      version="$(basename "$versionDir")"
+                      if find "$versionDir" \( -type f -o -type l \) \( -name "$module-$version.*" -o -name "$module-$version-*.*" \) -print -quit | grep -q .; then
+                        printf '%s\n' "$version"
+                      fi
+                    done | sort -u
+                  )"
+                  [ -n "$versions" ] || continue
+                  latest="$(printf '%s\n' "$versions" | tail -n 1)"
+
+                  relative="''${moduleDir#"$repoRoot"/}"
+                  groupPath="$(dirname "$relative")"
+                  if [ "$groupPath" = "." ]; then
+                    groupId=""
+                  else
+                    groupId="$(printf '%s' "$groupPath" | tr '/' '.')"
+                  fi
+
+                  metadataFile="$moduleDir/maven-metadata.xml"
+                  {
+                    printf '%s\n' '<metadata>'
+                    [ -z "$groupId" ] || printf '  <groupId>%s</groupId>\n' "$groupId"
+                    printf '  <artifactId>%s</artifactId>\n' "$module"
+                    printf '%s\n' '  <versioning>'
+                    printf '    <latest>%s</latest>\n' "$latest"
+                    printf '    <release>%s</release>\n' "$latest"
+                    printf '%s\n' '    <versions>'
+                    printf '%s\n' "$versions" | while IFS= read -r version; do
+                      printf '      <version>%s</version>\n' "$version"
+                    done
+                    printf '%s\n' '    </versions>'
+                    printf '%s\n' '  </versioning>'
+                    printf '%s\n' '</metadata>'
+                  } > "$metadataFile"
+                done
+              done
+            '';
             linkArtifact = outputPath: urlAttrs:
                 let
                   artifact =
@@ -152,7 +197,7 @@ in rec {
         in
             ''
               mkdir -p $out/cas
-            '' + concatStringsSep "\n" (concatLists (mapAttrsToList linkArtifact artifacts)));
+            '' + concatStringsSep "\n" (concatLists (mapAttrsToList linkArtifact artifacts)) + "\n" + synthesizeMavenMetadata);
 
     repoConfig = {repos, nixrepo, name}:
         let
