@@ -1084,12 +1084,6 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         log.error(s"[SBTIX_DEBUG genComposition] Loaded plugin jar $codePath does not match expected $expectedJar")
         sys.error("sbtix: plugin jar mismatch; ensure sbtix wrapper is rebuilt and on PATH")
       }
-      versionFromPath.foreach { pathVer =>
-        if (pathVer != currentPluginVersion) {
-          log.error(s"[SBTIX_DEBUG genComposition] Detected stale plugin on classpath: $pathVer, expected $currentPluginVersion (codeSource=$codePath)")
-          sys.error("sbtix: loaded plugin jar does not match the current sbtix version; please rerun with the rebuilt sbtix tool.")
-        }
-      }
 
       // Write generated nix
       val generatedNixFile = new File(genNixProjectDir.value, GeneratedNixFileName)
@@ -1261,16 +1255,6 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
             "[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access."
           }
         }
-      }
-      
-      // Automatically fix any IVY_LOCAL_BASE references in the generated file to use ivyDir
-      // This ensures compatibility regardless of which template or source is used
-      try {
-
-      } catch {
-        case e: Exception => 
-          log.error(s"[SBTIX_DEBUG genComposition] Error fixing IVY_LOCAL_BASE references: ${e.getMessage}")
-          e.printStackTrace()
       }
     },
     

@@ -20,6 +20,7 @@ When you touch the templates under `plugin/src/main/resources/sbtix/` (for examp
 The scripted tests assert the stable generated-repository contract with targeted checks and a full `nix-build`. They do not exact-mirror every generated `repo.nix` entry, because Coursier can expose additional cached POM metadata that is useful but not part of sbtix's behavioral contract.
 `sbtix-generated.nix` is generated at runtime and is intentionally **not** checked in for scripted tests (it includes store paths and timestamps).
 If you intentionally change generator behavior, update the relevant scripted assertions to describe the new contract rather than copying an entire cache-dependent repository closure.
+POM metadata enrichment intentionally fetches missing parent/BOM metadata from Maven Central only. For private or Ivy repositories, make sure the required metadata is already resolved by Coursier or add it to `manual-repo.nix` instead of teaching tests to rely on authenticated network fetches.
 If you are testing a local sbtix change and want generated Nix files to stay flake-pure-safe, follow “Local sbtix checkouts” below.
 
 Tip: sbtix keeps verbose resolver diagnostics off by default for performance. To enable the
