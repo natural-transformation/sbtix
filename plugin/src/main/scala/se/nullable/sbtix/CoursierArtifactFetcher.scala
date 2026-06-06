@@ -197,7 +197,8 @@ class CoursierArtifactFetcher(
   scalaBinaryVersion: String,
   extraIvyProps: Map[String, String] = Map.empty,
   artifactClassifiers: Seq[String] = Seq("tests", "sources"),
-  lockPomDependencyArtifacts: Boolean = false
+  lockPomDependencyArtifacts: Boolean = false,
+  lockEvictedModulePoms: Boolean = false
 ) {
 
   private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
@@ -303,6 +304,9 @@ class CoursierArtifactFetcher(
       report.configurations
         .flatMap(_.modules)
     val resolvedModuleReports = allModuleReports.filterNot(_.evicted)
+    val metadataModuleReports =
+      if (lockEvictedModulePoms) allModuleReports
+      else resolvedModuleReports
 
     val reportArtifacts =
       resolvedModuleReports.flatMap { moduleReport =>
@@ -314,8 +318,8 @@ class CoursierArtifactFetcher(
       }
 
     val modulePomArtifacts =
-      allModuleReports.flatMap { moduleReport =>
-        modulePomCandidates(moduleReport.module, repoDescriptors, fetchIfMissing = true).flatMap { case (url, file) =>
+      metadataModuleReports.flatMap { moduleReport =>
+        modulePomCandidates(moduleReport.module, repoDescriptors, fetchIfMissing = lockEvictedModulePoms).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
       }

@@ -211,7 +211,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     relativePaths should contain("org/junit/junit-bom/5.13.1/junit-bom-5.13.1.pom")
   }
 
-  it should "lock evicted update report POM metadata without locking evicted jars" in {
+  it should "lock evicted update report POM metadata only when configured" in {
     val resolvers = Set[Resolver](
       MavenRepository("central", "https://repo1.maven.org/maven2")
     )
@@ -225,6 +225,15 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       "2.12",
       artifactClassifiers = Seq.empty
     )
+    val pluginFetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty,
+      lockEvictedModulePoms = true
+    )
 
     val evictedReport = ModuleReport(module, Vector.empty, Vector.empty).withEvicted(true)
     val report = UpdateReport(
@@ -233,11 +242,14 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       UpdateStats(0L, 0L, 0L, cached = true),
       Map.empty
     )
-    val (_, artifacts) = fetcher.fromUpdateReport(report)
-    val relativePaths = artifacts.map(_.relativePath)
+    val (_, projectArtifacts) = fetcher.fromUpdateReport(report)
+    val (_, pluginArtifacts) = pluginFetcher.fromUpdateReport(report)
+    val projectRelativePaths = projectArtifacts.map(_.relativePath)
+    val pluginRelativePaths = pluginArtifacts.map(_.relativePath)
 
-    relativePaths should contain("commons-io/commons-io/2.11.0/commons-io-2.11.0.pom")
-    relativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.jar"
+    projectRelativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.pom"
+    pluginRelativePaths should contain("commons-io/commons-io/2.11.0/commons-io-2.11.0.pom")
+    pluginRelativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.jar"
   }
 
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {

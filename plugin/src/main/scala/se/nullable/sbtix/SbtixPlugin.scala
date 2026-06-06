@@ -632,7 +632,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       scalaVersion: String,
       scalaBinaryVersion: String,
       extraIvyProps: Map[String, String] = Map.empty,
-      lockPomDependencyArtifacts: Boolean = false
+      lockPomDependencyArtifacts: Boolean = false,
+      lockEvictedModulePoms: Boolean = false
   ) {
     private def fetcher(artifactClassifiers: Seq[String]): CoursierArtifactFetcher =
       new CoursierArtifactFetcher(
@@ -643,7 +644,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         scalaBinaryVersion,
         extraIvyProps = extraIvyProps,
         artifactClassifiers = artifactClassifiers,
-        lockPomDependencyArtifacts = lockPomDependencyArtifacts
+        lockPomDependencyArtifacts = lockPomDependencyArtifacts,
+        lockEvictedModulePoms = lockEvictedModulePoms
       )
 
     def resolveDependencies(fetch: DependencyFetch): FetchResult =
@@ -798,7 +800,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         credentials,
         scalaVersion,
         scalaBinaryVersion,
-        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion)
+        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion),
+        lockEvictedModulePoms = true
       )
     val resolvedPluginArtifacts = fetchPluginPlan(
       pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),
