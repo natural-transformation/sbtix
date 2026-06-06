@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3
+
+### Fixed
+
+- Lock already-resolved project and plugin update reports for offline builds, including classifier artifacts, cached module POMs, parent POMs, import-scoped BOMs, and authenticated private artifacts.
+- Synthesize local Maven metadata from concrete locked versions instead of pinning mutable upstream `maven-metadata.xml` files, so sandboxed builds can replay version-range resolution without depending on changing repository metadata.
+
 ## 1.0.2
 
 ### Fixed
@@ -15,7 +22,7 @@
 
 ### Fixed
 
-- Do not pin mutable Maven `maven-metadata.xml` files or sidecars in generated `repo.nix` locks when Coursier fetches them while resolving version ranges or repository metadata. Instead, the generated Nix repository synthesizes local Maven metadata from the concrete locked versions so sandboxed/offline builds can still replay version-range resolution. The synthesized metadata intentionally includes only the locked `<versions>` list, not `<latest>` or `<release>` markers, to avoid implying upstream Maven version ordering.
+- Do not pin mutable Maven `maven-metadata.xml` files or sidecars in generated `repo.nix` locks when Coursier fetches them while resolving version ranges or repository metadata. This keeps generated Nix repositories reproducible after regenerating locks.
 
 ## 1.0.0
 
