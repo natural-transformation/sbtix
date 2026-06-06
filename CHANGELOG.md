@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+### Changed
+
+- Update sbt support to 1.12.11 and refresh the offline plugin bootstrap locks for the new sbt/Scala 2.12 baseline.
+- Update Scala 3 scripted coverage to the latest 3.3.x LTS release.
+- Improve deterministic POM metadata locking for project and sbt plugin repositories, including evicted module metadata needed by offline builds.
+- Document that opportunistic missing POM metadata fetching is limited to Maven Central; private and Ivy metadata should be resolved by Coursier or pinned in `manual-repo.nix`.
+
 ## 1.0.3
 
 ### Fixed
