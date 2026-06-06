@@ -4,7 +4,8 @@ import scala.language.postfixOps
 import scala.language.implicitConversions
 
 import java.io.{File, FileOutputStream}
-import java.net.{URI, URL}
+import java.net.{URI, URL, URLEncoder}
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.nio.file.{Files => NioFiles}
 import java.util.concurrent.{ConcurrentSkipListSet, ExecutorService}
@@ -18,11 +19,11 @@ import sbt.{uri, Credentials, Logger, ModuleID, Resolver}
 import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, ModuleReport, PatternsBasedRepository, URLRepository, UpdateReport}
 
 import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
-import coursier.core.{Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
+import coursier.core.{Authentication => CAuthentication, Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
 import coursier.core.ResolutionProcess
 import coursier.util.{Artifact => CArtifact, EitherT, Task}
 
-import lmcoursier.internal.shaded.coursier.core.Authentication
+import lmcoursier.internal.shaded.coursier.core.{Authentication => SbtCoursierAuthentication}
 import lmcoursier.internal.Resolvers
 
 import se.nullable.sbtix.data.RoseTree
@@ -789,10 +790,11 @@ class CoursierArtifactFetcher(
   /** Download an artifact, emit its NixArtifact(s), and for POMs also emit parent and import-scope BOMs. */
   private def fetchAndExpand(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor], dep: CDependency): Set[NixArtifact] = {
     val base = downloadArtifact(artifact).map { file =>
-      val descriptor = descriptorForUrl(artifact.url, repoDescriptors)
-      val relative = computeRelativePath(artifact.url, descriptor)
+      val artifactUrl = authenticatedArtifactUrl(artifact.url)
+      val descriptor = descriptorForUrl(artifactUrl, repoDescriptors)
+      val relative = computeRelativePath(artifactUrl, descriptor)
       val sha256 = computeSha256(file)
-      expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifact.url, sha256))
+      expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifactUrl, sha256))
     }.getOrElse(Set.empty)
 
     val pomExtras =
@@ -853,10 +855,11 @@ class CoursierArtifactFetcher(
       file: File,
       repoDescriptors: Seq[RepoDescriptor]
   ): Set[NixArtifact] = {
-    val descriptor = descriptorForUrl(url, repoDescriptors)
-    val relative = computeRelativePath(url, descriptor)
+    val artifactUrl = authenticatedArtifactUrl(url)
+    val descriptor = descriptorForUrl(artifactUrl, repoDescriptors)
+    val relative = computeRelativePath(artifactUrl, descriptor)
     val sha256 = computeSha256(file)
-    expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
+    expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifactUrl, sha256))
   }
 
   private def lockUpdateReportClassifiers(
@@ -923,15 +926,45 @@ class CoursierArtifactFetcher(
     } else None
   }
 
-  private def artifactForUrl(url: String): CArtifact =
+  private def artifactForUrl(url: String): CArtifact = {
+    val artifactUrl = authenticatedArtifactUrl(url)
     CArtifact(
-      url = url,
+      url = artifactUrl,
       checksumUrls = Map.empty[String, String],
       extra = Map.empty[String, CArtifact],
       changing = false,
       optional = true,
-      authentication = None
+      authentication = artifactAuthenticationForUrl(url)
     )
+  }
+
+  private def artifactAuthenticationForUrl(url: String): Option[CAuthentication] =
+    hostFromUrl(url).flatMap(credentialsForArtifactHost)
+
+  private def credentialsForArtifactHost(host: String): Option[CAuthentication] =
+    Credentials.forHost(credentials.toSeq, host).map { c =>
+      CAuthentication(
+        user = c.userName,
+        passwordOpt = Some(c.passwd),
+        realmOpt = Option(c.realm),
+        optional = false,
+        httpHeaders = Nil,
+        httpsOnly = false,
+        passOnRedirect = false
+      )
+    }
+
+  private def authenticatedArtifactUrl(url: String): String =
+    Try(new URI(url)).toOption
+      .filter(uri => Option(uri.getUserInfo).isEmpty)
+      .filter(uri => Option(uri.getScheme).exists(s => s == "http" || s == "https"))
+      .flatMap(uri => Option(uri.getHost).flatMap(host => Credentials.forHost(credentials.toSeq, host)))
+      .map { c =>
+        val scheme = url.takeWhile(_ != ':')
+        val prefix = s"$scheme://"
+        s"$prefix${c.userName}:${c.passwd}@${url.stripPrefix(prefix)}"
+      }
+      .getOrElse(url)
 
   private def cachedMavenPom(
       module: ModuleID,
@@ -1073,11 +1106,35 @@ class CoursierArtifactFetcher(
   private def cachedFileForUrl(url: String): Option[File] =
     Try(new URI(url)).toOption.flatMap { uri =>
       Option(uri.getScheme).filter(s => s == "http" || s == "https").flatMap { scheme =>
-        Option(uri.getHost).map { host =>
-          new File(new File(new File(CacheDefaults.location, scheme), host), uri.getRawPath.stripPrefix("/"))
-        }
+        val path = uri.getRawPath.stripPrefix("/")
+        val candidates =
+          cacheAuthorityCandidates(uri).map { authority =>
+            new File(new File(new File(CacheDefaults.location, scheme), authority), path)
+          }
+        candidates.find(_.isFile).orElse(candidates.headOption)
       }
     }
+
+  private def cacheAuthorityCandidates(uri: URI): Seq[String] = {
+    val host = Option(uri.getHost)
+    val hostWithPort = host.map { value =>
+      if (uri.getPort >= 0) s"$value:${uri.getPort}" else value
+    }
+    val credentialedAuthorities =
+      hostWithPort.toSeq.flatMap { authority =>
+        host.toSeq.flatMap { value =>
+          Credentials.forHost(credentials.toSeq, value).toSeq.flatMap { c =>
+            Seq(s"${c.userName}@$authority", s"${c.userName}:${c.passwd}@$authority")
+          }
+        }
+      }
+    (Option(uri.getRawAuthority).toSeq ++ credentialedAuthorities ++ hostWithPort.toSeq ++ host.toSeq)
+      .map(coursierCacheAuthority)
+      .distinct
+  }
+
+  private def coursierCacheAuthority(authority: String): String =
+    URLEncoder.encode(authority, StandardCharsets.UTF_8.name).replace("+", "%20")
 
   /** Parse a POM and lock any parent POM and imported BOMs (scope=import, type=pom). */
   private def collectPomAncestors(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor]): Set[NixArtifact] = {
@@ -1094,22 +1151,22 @@ class CoursierArtifactFetcher(
   private def computeSha256(file: File): String =
     NixArtifact.checksum(file)
 
-  private def authenticationFor(resolver: Resolver): Option[Authentication] = resolver match {
+  private def authenticationFor(resolver: Resolver): Option[SbtCoursierAuthentication] = resolver match {
     case m: MavenRepository =>
-      hostFromUrl(m.root).flatMap(credentialsForHost)
+      hostFromUrl(m.root).flatMap(credentialsForSbtCoursierHost)
     case p: PatternsBasedRepository if p.patterns.artifactPatterns.nonEmpty =>
       p.patterns.artifactPatterns.headOption
         .flatMap(hostFromUrl)
-        .flatMap(credentialsForHost)
+        .flatMap(credentialsForSbtCoursierHost)
     case _ => None
   }
 
   private def hostFromUrl(url: String): Option[String] =
     Try(new URI(url)).toOption.flatMap(uri => Option(uri.getHost))
 
-  private def credentialsForHost(host: String): Option[Authentication] =
+  private def credentialsForSbtCoursierHost(host: String): Option[SbtCoursierAuthentication] =
     Credentials.forHost(credentials.toSeq, host).map { c =>
-      Authentication(
+      SbtCoursierAuthentication(
         c.userName,
         c.passwd,
         optional = true,
