@@ -76,8 +76,8 @@ grep -q 'scala_2.12/sbt_1.0/${pluginVersion}' sbtix-generated.nix
 # Regression guard: sbt-native-packager pulls these plugin transitive deps;
 # if they disappear from the generated plugin repo, Nix will try to fetch
 # them online and CI will fail. Keep this fast, explicit check to fail early.
-grep -q 'junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom' project/project/repo.nix
-grep -q 'commons-lang3/3.16.0/commons-lang3-3.16.0.pom' project/project/repo.nix
+grep -q 'junit-bom/5.13.1/junit-bom-5.13.1.pom' project/project/repo.nix
+grep -q 'commons-lang3/3.18.0/commons-lang3-3.18.0.pom' project/project/repo.nix
 popd
 
 pushd two
@@ -102,12 +102,12 @@ grep -Eq 'sbtixSource = /nix/store/|rev = "[0-9a-f]{40}"' sbtix-generated.nix
 grep -q 'builtins.readDir' sbtix-generated.nix
 grep -q 'scala_2.12/sbt_1.0/${pluginVersion}' sbtix-generated.nix
 # Regression guard for sbt core modules: sbt-native-packager pulls
-# org.scala-sbt:io_2.12:1.10.4. We seed the sbt boot directory from the
+# org.scala-sbt:io_2.12:1.10.5. We seed the sbt boot directory from the
 # in-store sbt distribution to avoid any online fetches during Nix builds.
 grep -q 'share/sbt/boot' sbtix.nix
-grep -q 'org/scala-sbt/io_2.12/1.10.4/io_2.12-1.10.4.pom' project/project/repo.nix
+grep -q 'org/scala-sbt/io_2.12/1.10.5/io_2.12-1.10.5.pom' project/project/repo.nix
 nix-build
 ./result/bin/mb-three
-grep -q 'junit-bom/5.11.0-M2/junit-bom-5.11.0-M2.pom' project/project/repo.nix
-grep -q 'commons-lang3/3.16.0/commons-lang3-3.16.0.pom' project/project/repo.nix
+grep -q 'junit-bom/5.13.1/junit-bom-5.13.1.pom' project/project/repo.nix
+grep -q 'commons-lang3/3.18.0/commons-lang3-3.18.0.pom' project/project/repo.nix
 popd

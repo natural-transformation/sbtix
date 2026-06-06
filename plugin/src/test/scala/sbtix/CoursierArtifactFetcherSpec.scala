@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.{File, PrintWriter}
 import se.nullable.sbtix.Utils
 import se.nullable.sbtix.{CoursierArtifactFetcher, Dependency, NixArtifact, NixRepo}
-import sbt.librarymanagement.{MavenRepository, Patterns, ScalaModuleInfo}
+import sbt.librarymanagement.{ConfigRef, ConfigurationReport, MavenRepository, ModuleReport, Patterns, ScalaModuleInfo, UpdateReport, UpdateStats}
 import sbt.{Logger, ModuleID, Resolver}
 
 class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
@@ -203,9 +203,43 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
 
     val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
     val (_, artifacts) = fetcher.lockModulePoms(Set(module))
+    val relativePaths = artifacts.map(_.relativePath)
 
     seedErrors.flatMap(_.errors) shouldBe empty
-    artifacts.map(_.relativePath) should contain("org/scala-lang/modules/scala-xml_2.12/2.2.0/scala-xml_2.12-2.2.0.jar")
+    relativePaths should contain("org/scala-lang/modules/scala-xml_2.12/2.2.0/scala-xml_2.12-2.2.0.jar")
+    relativePaths should contain("org/apache/commons/commons-parent/85/commons-parent-85.pom")
+    relativePaths should contain("org/junit/junit-bom/5.13.1/junit-bom-5.13.1.pom")
+  }
+
+  it should "lock evicted update report POM metadata without locking evicted jars" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("commons-io", "commons-io", "2.11.0")
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
+    val evictedReport = ModuleReport(module, Vector.empty, Vector.empty).withEvicted(true)
+    val report = UpdateReport(
+      new File("ivy.xml"),
+      Vector(ConfigurationReport(ConfigRef("compile"), Vector(evictedReport), Vector.empty)),
+      UpdateStats(0L, 0L, 0L, cached = true),
+      Map.empty
+    )
+    val (_, artifacts) = fetcher.fromUpdateReport(report)
+    val relativePaths = artifacts.map(_.relativePath)
+
+    seedErrors.flatMap(_.errors) shouldBe empty
+    relativePaths should contain("commons-io/commons-io/2.11.0/commons-io-2.11.0.pom")
+    relativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.jar"
   }
 
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {

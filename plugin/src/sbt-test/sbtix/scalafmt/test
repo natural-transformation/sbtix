@@ -6,10 +6,12 @@ $ exec grep -q 'com/typesafe/config/1.4.9/config-1.4.9-sources.jar' repo.nix
 $ exec grep -q 'org/scalameta/scalafmt-core_2.13/3.11.1/scalafmt-core_2.13-3.11.1.jar' repo.nix
 $ exec grep -q 'uk/co/real-logic/sbe-tool/1.38.1/sbe-tool-1.38.1.pom' repo.nix
 $ exec sh -c '! grep -q "org/agrona/agrona/maven-metadata.xml" repo.nix'
-$ exec grep -q 'org/bouncycastle/bcprov-jdk18on/1.84/bcprov-jdk18on-1.84.pom' repo.nix
+$ exec grep -q 'org/apache/pulsar/bouncy-castle-parent/4.2.1/bouncy-castle-parent-4.2.1.pom' repo.nix
 $ exec grep -q 'org/scalameta/sbt-scalafmt_2.12_1.0/2.6.1/sbt-scalafmt-2.6.1.pom' project/repo.nix
 $ exec grep -q 'sbt-revolver' project/repo.nix
 $ exec grep -q 'net/vonbuchholtz/sbt-dependency-check_2.12_1.0/5.1.0/sbt-dependency-check-5.1.0.pom' project/repo.nix
+$ exec grep -q 'commons-io/commons-io/2.11.0/commons-io-2.11.0.pom' project/repo.nix
+$ exec grep -q 'org/apache/commons/commons-compress/1.22/commons-compress-1.22.pom' project/repo.nix
 $ exec grep -q 'org/junit/junit-bom/5.8.2/junit-bom-5.8.2.pom' project/repo.nix
 > genComposition
 $ exists default.nix

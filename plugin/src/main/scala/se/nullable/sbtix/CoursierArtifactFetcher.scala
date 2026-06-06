@@ -45,12 +45,17 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
         classpathDeps: Set[PomDep],
         providedDeps: Set[PomDep],
         versionRangeDeps: Set[PomDep],
-        properties: Map[String, String]
+        properties: Map[String, String],
+        managedDeps: Map[(String, String), PomDep]
     )
 
-    val empty: Model = Model(Nil, Set.empty, Set.empty, Set.empty, Set.empty, Set.empty, Map.empty)
+    val empty: Model = Model(Nil, Set.empty, Set.empty, Set.empty, Set.empty, Set.empty, Map.empty, Map.empty)
 
-    def parse(file: File, inheritedProperties: Map[String, String] = Map.empty): Model = {
+    def parse(
+        file: File,
+        inheritedProperties: Map[String, String] = Map.empty,
+        inheritedManagedDeps: Map[(String, String), PomDep] = Map.empty
+    ): Model = {
       val xml = scala.xml.XML.loadFile(file)
       def childText(node: scala.xml.Node, label: String): Option[String] =
         (node \ label).headOption.map(_.text.trim).filter(_.nonEmpty)
@@ -103,7 +108,26 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
         )
       }.toList
       val managedDeps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map(parseDep).toSet
-      val directDeps = (xml \ "dependencies" \ "dependency").map(parseDep).toSet
+      val managedDepsByKey =
+        inheritedManagedDeps ++ managedDeps
+          .filter(dep => dep.groupId.nonEmpty && dep.artifactId.nonEmpty && dep.version.nonEmpty)
+          .map(dep => (dep.groupId -> dep.artifactId) -> dep)
+          .toMap
+      def applyManagedVersion(dep: PomDep): PomDep =
+        if (dep.version.nonEmpty) dep
+        else {
+          managedDepsByKey
+            .get(dep.groupId -> dep.artifactId)
+            .map { managed =>
+              dep.copy(
+                version = managed.version,
+                scope = if (dep.scope.nonEmpty) dep.scope else managed.scope,
+                `type` = if (dep.`type`.nonEmpty) dep.`type` else managed.`type`
+              )
+            }
+            .getOrElse(dep)
+        }
+      val directDeps = (xml \ "dependencies" \ "dependency").map(parseDep).map(applyManagedVersion).toSet
       val importBoms = managedDeps.filter(d => d.scope == "import" && d.`type` == "pom")
       val metadataScopes = Set("", "compile", "runtime", "optional")
       val metadataDeps =
@@ -117,7 +141,7 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
       val providedDeps = directDeps.filter(_.scope == "provided")
       val deps = managedDeps ++ directDeps
       val versionRangeDeps = deps.filter(d => isVersionRange(d.version))
-      Model(parent, importBoms, metadataDeps, classpathDeps, providedDeps, versionRangeDeps, properties)
+      Model(parent, importBoms, metadataDeps, classpathDeps, providedDeps, versionRangeDeps, properties, managedDepsByKey)
     }
 
     private val propertyPattern = "\\$\\{([^}]+)\\}".r
@@ -275,13 +299,13 @@ class CoursierArtifactFetcher(
   def fromUpdateReport(report: UpdateReport): (Set[NixRepo], Set[NixArtifact]) = {
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
-    val moduleReports =
+    val allModuleReports =
       report.configurations
         .flatMap(_.modules)
-        .filterNot(_.evicted)
+    val resolvedModuleReports = allModuleReports.filterNot(_.evicted)
 
     val reportArtifacts =
-      moduleReports.flatMap { moduleReport =>
+      resolvedModuleReports.flatMap { moduleReport =>
         moduleReport.artifacts.flatMap { case (artifact, file) =>
           artifact.url.toSeq.flatMap { url =>
             lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
@@ -290,14 +314,14 @@ class CoursierArtifactFetcher(
       }
 
     val modulePomArtifacts =
-      moduleReports.flatMap { moduleReport =>
+      allModuleReports.flatMap { moduleReport =>
         cachedModulePoms(moduleReport.module, repoDescriptors).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
       }
 
     val classifierArtifacts =
-      lockUpdateReportClassifiers(moduleReports, repoDescriptors)
+      lockUpdateReportClassifiers(resolvedModuleReports, repoDescriptors)
 
     val artifacts =
       (reportArtifacts ++ modulePomArtifacts ++ classifierArtifacts)
@@ -1069,8 +1093,8 @@ class CoursierArtifactFetcher(
       if (includeClasspathArtifacts) pom.classpathDeps.flatMap(dependencyLockCandidates).map((_, true))
       else Set.empty[(PomModel.PomDep, Boolean)]
     val candidates =
-      pom.parents.map((_, false)) ++
-        pom.importBoms.map((_, false)) ++
+      pom.parents.map((_, true)) ++
+        pom.importBoms.map((_, true)) ++
         pom.metadataDeps.map((_, false)) ++
         classpathArtifacts ++
         pom.providedDeps.flatMap(dependencyLockCandidates).map((_, true))
@@ -1103,8 +1127,11 @@ class CoursierArtifactFetcher(
       repoDescriptors: Seq[RepoDescriptor],
       seen: Set[String]
   ): PomModel.Model = {
-    def parseCachedPom(inheritedProperties: Map[String, String] = Map.empty): Option[PomModel.Model] =
-      try Some(PomModel.parse(pomFile, inheritedProperties))
+    def parseCachedPom(
+        inheritedProperties: Map[String, String] = Map.empty,
+        inheritedManagedDeps: Map[(String, String), PomModel.PomDep] = Map.empty
+    ): Option[PomModel.Model] =
+      try Some(PomModel.parse(pomFile, inheritedProperties, inheritedManagedDeps))
       catch {
         case NonFatal(e) =>
           SbtixDebug.warn(logger) {
@@ -1114,14 +1141,18 @@ class CoursierArtifactFetcher(
       }
 
     val firstPass = parseCachedPom().getOrElse(PomModel.empty)
-    val inheritedProperties =
+    val parentModels =
       firstPass.parents.flatMap { parent =>
-        cachedPomCandidates(parent, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
-          cachedPomModel(file, repoDescriptors, seen + url).properties
-        }
-      }.toMap
-    if (inheritedProperties.isEmpty) firstPass
-    else parseCachedPom(inheritedProperties).getOrElse(firstPass)
+        pomDependencyCandidates(parent, repoDescriptors, fetchIfMissing = true)
+          .filterNot { case (url, _) => seen(url) }
+          .map { case (url, file) =>
+            cachedPomModel(file, repoDescriptors, seen + url)
+          }
+      }
+    val inheritedProperties = parentModels.flatMap(_.properties).toMap
+    val inheritedManagedDeps = parentModels.flatMap(_.managedDeps).toMap
+    if (inheritedProperties.isEmpty && inheritedManagedDeps.isEmpty) firstPass
+    else parseCachedPom(inheritedProperties, inheritedManagedDeps).getOrElse(firstPass)
   }
 
   private def cachedPomCandidates(
