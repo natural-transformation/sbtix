@@ -315,7 +315,7 @@ class CoursierArtifactFetcher(
 
     val modulePomArtifacts =
       allModuleReports.flatMap { moduleReport =>
-        cachedModulePoms(moduleReport.module, repoDescriptors).flatMap { case (url, file) =>
+        modulePomCandidates(moduleReport.module, repoDescriptors, fetchIfMissing = true).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
       }
@@ -338,7 +338,7 @@ class CoursierArtifactFetcher(
     val nixRepos = repoDescriptors.map(_.repo).toSet
     val artifacts =
       modules.flatMap(publicationVariants).flatMap { module =>
-        cachedModulePoms(module, repoDescriptors).flatMap { case (url, file) =>
+        modulePomCandidates(module, repoDescriptors, fetchIfMissing = false).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
       }
@@ -1043,15 +1043,19 @@ class CoursierArtifactFetcher(
       .flatMap(url => cachedFileForUrl(url).filter(_.isFile).map(file => (url, file)))
   }
 
-  private def cachedModulePoms(
+  private def modulePomCandidates(
       module: ModuleID,
-      repoDescriptors: Seq[RepoDescriptor]
+      repoDescriptors: Seq[RepoDescriptor],
+      fetchIfMissing: Boolean
   ): Set[(String, File)] = {
     val modulePath =
       s"${module.organization.replace('.', '/')}/${module.name}/${module.revision}/${module.name}-${module.revision}.pom"
     repoDescriptors.flatMap { descriptor =>
       val url = descriptor.normalizedRoot + modulePath
-      cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+      cachedFileForUrl(url)
+        .filter(_.isFile)
+        .orElse(if (fetchIfMissing && descriptor.normalizedRoot == DefaultPublicRoot) downloadArtifact(artifactForUrl(url)) else None)
+        .map(file => (url, file))
     }.toSet
   }
 

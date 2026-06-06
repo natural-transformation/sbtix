@@ -226,7 +226,6 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       artifactClassifiers = Seq.empty
     )
 
-    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
     val evictedReport = ModuleReport(module, Vector.empty, Vector.empty).withEvicted(true)
     val report = UpdateReport(
       new File("ivy.xml"),
@@ -237,7 +236,6 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     val (_, artifacts) = fetcher.fromUpdateReport(report)
     val relativePaths = artifacts.map(_.relativePath)
 
-    seedErrors.flatMap(_.errors) shouldBe empty
     relativePaths should contain("commons-io/commons-io/2.11.0/commons-io-2.11.0.pom")
     relativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.jar"
   }
