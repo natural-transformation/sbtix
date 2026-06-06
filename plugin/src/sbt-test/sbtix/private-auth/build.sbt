@@ -1,9 +1,9 @@
-ThisBuild / scalaVersion := "2.13.16"
+ThisBuild / scalaVersion := "2.13.18"
 
 lazy val one = project.settings(
   credentials += Credentials(realm = "Very secret stuff!", host = "localhost", userName = "test", passwd = "test"),
   libraryDependencies ++= Seq(
-    "com.typesafe.slick" %% "slick" % "3.3.3",
+    "com.typesafe.slick" %% "slick" % "3.6.1",
     "private-org" % "private-name" % "1.2.3"
   )
 )

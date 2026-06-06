@@ -4,14 +4,35 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues
 import sbt.ModuleID
-import sbt.librarymanagement.UpdateReport
+import sbt.librarymanagement.{ConfigRef, ConfigurationReport, ModuleReport, UpdateReport, UpdateStats}
+import java.io.File
+import java.nio.file.Files
 
 class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
 
+  private def updateReport(modules: ModuleID*): UpdateReport = {
+    val reports =
+      modules.map(module => ModuleReport(module, Vector.empty, Vector.empty)).toVector
+    UpdateReport(
+      new File("ivy.xml"),
+      Vector(ConfigurationReport(ConfigRef("compile"), reports, Vector.empty)),
+      UpdateStats(0L, 0L, 0L, cached = true),
+      Map.empty
+    )
+  }
+
+  private def writePluginsFile(base: File, body: String): File = {
+    val projectDir = new File(base, "project")
+    projectDir.mkdirs() shouldBe true
+    val pluginsFile = new File(projectDir, "plugins.sbt")
+    sbt.IO.write(pluginsFile, body)
+    pluginsFile
+  }
+
   "pluginFetchPlan" should "use the already-resolved plugin update report without re-resolving plugin roots" in {
     val regularPlugin = ModuleID("io.spray", "sbt-revolver", "0.10.0")
-    val scalafmtPlugin = ModuleID("org.scalameta", "sbt-scalafmt", "2.5.6")
-    val report = null.asInstanceOf[UpdateReport]
+    val scalafmtPlugin = ModuleID("org.scalameta", "sbt-scalafmt", "2.6.1")
+    val report = updateReport(regularPlugin, scalafmtPlugin)
 
     val plan = SbtixPlugin.pluginFetchPlan(
       Set(regularPlugin, scalafmtPlugin),
@@ -24,9 +45,33 @@ class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
     fetches shouldBe empty
   }
 
+  it should "prefer the resolved plugin report even when declared plugin parsing found no modules" in {
+    val report = updateReport(ModuleID("com.example", "sbt-declared-elsewhere", "1.0.0"))
+
+    val plan = SbtixPlugin.pluginFetchPlan(
+      Set.empty,
+      Some(report),
+      Seq("sources")
+    )
+
+    plan shouldBe a[SbtixPlugin.PluginReportAndDependencyFetches]
+    val SbtixPlugin.PluginReportAndDependencyFetches(`report`, fetches) = plan
+    fetches shouldBe empty
+  }
+
+  it should "ignore empty plugin update reports when no declared plugins were found" in {
+    val plan = SbtixPlugin.pluginFetchPlan(
+      Set.empty,
+      Some(updateReport()),
+      Seq("sources")
+    )
+
+    plan shouldBe SbtixPlugin.NoPluginFetch
+  }
+
   it should "resolve declared plugin modules when no update report is available" in {
     val regularPlugin = ModuleID("io.spray", "sbt-revolver", "0.10.0")
-    val scalafmtPlugin = ModuleID("org.scalameta", "sbt-scalafmt", "2.5.6")
+    val scalafmtPlugin = ModuleID("org.scalameta", "sbt-scalafmt", "2.6.1")
 
     val plan = SbtixPlugin.pluginFetchPlan(
       Set(regularPlugin, scalafmtPlugin),
@@ -48,5 +93,18 @@ class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
     val scalafmtFetch = fetches.find(_.context.exists(_.contains("sbt-scalafmt plugin"))).value
     scalafmtFetch.artifactClassifiers shouldBe empty
     scalafmtFetch.dependencies.map(_.moduleId) shouldBe Set(scalafmtPlugin)
+  }
+
+  "pluginFilesFrom" should "prefer the nearest plugins.sbt when builds are nested" in {
+    val outer = Files.createTempDirectory("sbtix-outer-build").toFile
+    val inner = new File(outer, "inner")
+    inner.mkdirs() shouldBe true
+    val outerPlugins = writePluginsFile(outer, """addSbtPlugin("outer" % "plugin" % "1.0.0")""")
+    val innerPlugins = writePluginsFile(inner, """addSbtPlugin("inner" % "plugin" % "1.0.0")""")
+
+    SbtixPlugin.pluginFilesFrom(inner).map(_.getCanonicalFile) shouldBe List(
+      innerPlugins.getCanonicalFile,
+      outerPlugins.getCanonicalFile
+    )
   }
 }

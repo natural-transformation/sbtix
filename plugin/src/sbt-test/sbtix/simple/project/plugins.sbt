@@ -3,10 +3,10 @@ sys.props.get("plugin.version") match {
   case _ => sys.error("The system property 'plugin.version' is not defined.")
 }
 
-addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.11.0")
+addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.11.7")
 
 // Not actually needed/used, but here to test sbtix correctly fetches
 // plugins that are not on Maven Central and only on sbt-plugin-releases:
-addSbtPlugin("net.bzzt" % "sbt-reproducible-builds" % "0.25")
+addSbtPlugin("net.bzzt" % "sbt-reproducible-builds" % "0.32")
 
 resolvers += Resolver.sbtPluginRepo("releases")

@@ -7,35 +7,19 @@ import sbt.librarymanagement.{ CrossVersion, Patterns, UpdateReport }
 import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
+import java.util.Properties
 import scala.sys.process._
 import scala.io.Source
 import sbt.io.syntax._
 import coursier.core.{Dependency => CoursierDependency, Module => CoursierCoreModule, ModuleName => CoursierModuleName, Organization => CoursierOrganization}
 import sbt.plugins.JvmPlugin
-import sbt.IO.{copyFile, write}
+import scala.util.Try
 
 /**
  * The main plugin for Sbtix, which provides Nix integration for SBT.
  */
 object SbtixPlugin extends AutoPlugin {
   import se.nullable.sbtix.SbtixHashes._
-  private def findExpectedFile(baseDir: File, relativeNames: Seq[String]): Option[File] = {
-    @annotation.tailrec
-    def loop(dir: File): Option[File] = {
-      if (dir == null) None
-      else {
-        val expectedDir = new File(dir, "expected")
-        val found = relativeNames.collectFirst {
-          case name if new File(expectedDir, name).exists() => new File(expectedDir, name)
-        }
-        found match {
-          case some @ Some(_) => some
-          case None => loop(dir.getParentFile)
-        }
-      }
-    }
-    loop(baseDir)
-  }
 
   private val genNixProjectDir = settingKey[File]("Directory where to put the generated nix files")
   private val SampleDefaultTemplateResource = "/sbtix/default.nix.template"
@@ -409,13 +393,13 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
   private lazy val sampleDefaultTemplate: String =
     loadSampleDefaultTemplate()
   
-  private def pluginFilesFrom(baseDir: File): List[File] = {
+  private[sbtix] def pluginFilesFrom(baseDir: File): List[File] = {
     @annotation.tailrec
     def collect(dir: File, acc: List[File]): List[File] = {
       if (dir == null) acc
       else {
         val candidate = new File(dir, "project/plugins.sbt")
-        val nextAcc = if (candidate.exists()) candidate :: acc else acc
+        val nextAcc = if (candidate.exists()) acc :+ candidate else acc
         collect(dir.getParentFile, nextAcc)
       }
     }
@@ -486,16 +470,46 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       }
       .getOrElse(Set.empty)
 
-  private def sbtBridgeModuleName(scalaVersion: String): Option[String] =
+  private def scala213UsesBinaryBridge(scalaVersion: String): Boolean =
+    Try(scalaVersion.stripPrefix("2.13.").takeWhile(_.isDigit).toInt).toOption.exists(_ >= 12)
+
+  private def compilerBridgeModuleName(scalaVersion: String): Option[String] =
     scalaVersion match {
-      case version if version.startsWith("3.")    => Some("scala3-sbt-bridge")
-      case version if version.startsWith("2.13.") => Some("scala2-sbt-bridge")
+      case version if version.startsWith("2.10.") => Some("compiler-bridge_2.10")
+      case version if version.startsWith("2.11.") => Some("compiler-bridge_2.11")
+      case version if version.startsWith("2.12.") => Some("compiler-bridge_2.12")
+      case "2.13.0-M1"                            => Some("compiler-bridge_2.12")
+      case version if version.startsWith("2.13.") => Some("compiler-bridge_2.13")
       case _                                      => None
     }
 
+  private def zincComponentVersion(log: Logger): Option[String] = {
+    Option(getClass.getResourceAsStream("/incrementalcompiler.version.properties")) match {
+      case Some(input) =>
+        try {
+          val properties = new Properties()
+          properties.load(input)
+          Option(properties.getProperty("version")).filter(_.nonEmpty)
+        } finally input.close()
+      case None =>
+        SbtixDebug.warn(log) {
+          "[SBTIX_DEBUG] Could not locate incrementalcompiler.version.properties; Scala 2 compiler bridge tooling will not be locked explicitly."
+        }
+        None
+    }
+  }
+
   private def sbtToolingDependencies(scalaVersion: String, log: Logger): Set[Dependency] =
-    sbtBridgeModuleName(scalaVersion).map { bridgeName =>
-      val bridge = ModuleID("org.scala-lang", bridgeName, scalaVersion)
+    (scalaVersion match {
+      case version if version.startsWith("3.") =>
+        Some(ModuleID("org.scala-lang", "scala3-sbt-bridge", version))
+      case version if version.startsWith("2.13.") && scala213UsesBinaryBridge(version) =>
+        Some(ModuleID("org.scala-lang", "scala2-sbt-bridge", version))
+      case version =>
+        compilerBridgeModuleName(version).flatMap { bridgeName =>
+          zincComponentVersion(log).map(ModuleID("org.scala-sbt", bridgeName, _))
+        }
+    }).map { bridge =>
       SbtixDebug.info(log) {
         s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala builds: ${bridge.organization}:${bridge.name}:${bridge.revision}"
       }
@@ -617,7 +631,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       credentials: Set[Credentials],
       scalaVersion: String,
       scalaBinaryVersion: String,
-      extraIvyProps: Map[String, String] = Map.empty
+      extraIvyProps: Map[String, String] = Map.empty,
+      lockPomDependencyArtifacts: Boolean = false,
+      lockEvictedModulePoms: Boolean = false
   ) {
     private def fetcher(artifactClassifiers: Seq[String]): CoursierArtifactFetcher =
       new CoursierArtifactFetcher(
@@ -627,7 +643,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         scalaVersion,
         scalaBinaryVersion,
         extraIvyProps = extraIvyProps,
-        artifactClassifiers = artifactClassifiers
+        artifactClassifiers = artifactClassifiers,
+        lockPomDependencyArtifacts = lockPomDependencyArtifacts,
+        lockEvictedModulePoms = lockEvictedModulePoms
       )
 
     def resolveDependencies(fetch: DependencyFetch): FetchResult =
@@ -708,16 +726,19 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     val (scalafmtPluginModuleIds, regularPluginModuleIds) =
       pluginModuleIds.partition(isSbtScalafmtPlugin)
     (pluginModuleIds.isEmpty, updateReport) match {
+      case (_, Some(report)) if updateReportHasModules(report) =>
+        PluginReportAndDependencyFetches(report, Seq.empty)
       case (true, _) =>
         NoPluginFetch
-      case (_, Some(report)) =>
-        PluginReportAndDependencyFetches(report, Seq.empty)
       case _ =>
         PluginDependencyFetches(
           pluginDependencyFetchPlan(regularPluginModuleIds, scalafmtPluginModuleIds, artifactClassifiers)
         )
     }
   }
+
+  private[sbtix] def updateReportHasModules(report: UpdateReport): Boolean =
+    report.configurations.exists(_.modules.exists(!_.evicted))
 
   private def pluginDependencyFetchPlan(
       regularPluginModuleIds: Set[ModuleID],
@@ -779,13 +800,24 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         credentials,
         scalaVersion,
         scalaBinaryVersion,
-        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion)
+        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion),
+        lockEvictedModulePoms = true
       )
-    val result = fetchPluginPlan(
+    val resolvedPluginArtifacts = fetchPluginPlan(
       pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),
       config,
       artifactClassifiers
     )
+    val rootPomArtifacts =
+      if (pluginModuleIds.isEmpty) FetchResult.empty
+      else {
+        // sbt's plugin loader can use direct compile/runtime dependencies from a
+        // declared plugin POM even when they are absent from the update report.
+        // Keep that expansion scoped to plugin roots instead of treating every
+        // transitive POM as a new classpath root.
+        config.copy(lockPomDependencyArtifacts = true).lockModulePoms(pluginModuleIds)
+      }
+    val result = FetchResult.combine(Seq(resolvedPluginArtifacts, rootPomArtifacts))
     if (result.hasLockedArtifacts) Some((scalaVersion, result.repos, result.artifacts))
     else None
   }
@@ -900,42 +932,23 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       // Generate the Nix expressions and write to files
       val currentBase = baseDirectory.value
       val repoFile = new File(currentBase, "repo.nix")
-      val repoCandidateOrder =
-        if (new File(currentBase, "build.sbt").exists()) Seq("repo.nix", "project-repo.nix")
-        else Seq("project-repo.nix", "repo.nix")
-      
-      // Copy the expected file for repo.nix if it exists
-      findExpectedFile(currentBase, repoCandidateOrder) match {
-        case Some(expectedRepoFile) =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected repo.nix from ${expectedRepoFile.getAbsolutePath}" }
-          IO.copyFile(expectedRepoFile, repoFile)
-        case None =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Expected repo.nix not found for ${baseDirectory.value}, generating file" }
-          IO.write(repoFile, NixWriter2(repos, artifacts, scalaVer, sbtVer))
-      }
+
+      IO.write(repoFile, NixWriter2(repos, artifacts, scalaVer, sbtVer))
       log.info(s"Wrote repository definitions to ${repoFile}")
       
-      // For project/repo.nix also copy from expected if available
       val projectDir = new File(baseDirectory.value, "project")
       val projectRepoFile = new File(projectDir, "repo.nix")
       IO.createDirectory(projectDir)
       
-      // Copy the expected file for testing
-      findExpectedFile(baseDirectory.value, Seq("project-repo.nix")) match {
-        case Some(expectedProjectRepoFile) =>
-          SbtixDebug.info(log) { s"[SBTIX_DEBUG] Using expected project-repo.nix from ${expectedProjectRepoFile.getAbsolutePath}" }
-          IO.copyFile(expectedProjectRepoFile, projectRepoFile)
-        case None =>
-          pluginFetchResult match {
-            case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
-              SbtixDebug.info(log) {
-                s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts"
-              }
-              IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
-            case _ =>
-              SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo" }
-          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
+      pluginFetchResult match {
+        case Some((pluginScalaVersion, pluginRepos, pluginArtifacts)) if pluginRepos.nonEmpty || pluginArtifacts.nonEmpty =>
+          SbtixDebug.info(log) {
+            s"[SBTIX_DEBUG] Writing plugin repository definitions with ${pluginRepos.size} repos and ${pluginArtifacts.size} artifacts"
           }
+          IO.write(projectRepoFile, NixWriter2(pluginRepos, pluginArtifacts, pluginScalaVersion, sbtVer))
+        case _ =>
+          SbtixDebug.info(log) { s"[SBTIX_DEBUG] No plugin dependencies detected; writing placeholder project repo" }
+          IO.write(projectRepoFile, NixWriter2(Set.empty, Set.empty, scalaVer, sbtVer))
       }
       
       log.info(s"Wrote plugin repository definitions to ${projectRepoFile}")
@@ -1070,12 +1083,6 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       if (!codePath.contains(expectedJar)) {
         log.error(s"[SBTIX_DEBUG genComposition] Loaded plugin jar $codePath does not match expected $expectedJar")
         sys.error("sbtix: plugin jar mismatch; ensure sbtix wrapper is rebuilt and on PATH")
-      }
-      versionFromPath.foreach { pathVer =>
-        if (pathVer != currentPluginVersion) {
-          log.error(s"[SBTIX_DEBUG genComposition] Detected stale plugin on classpath: $pathVer, expected $currentPluginVersion (codeSource=$codePath)")
-          sys.error("sbtix: loaded plugin jar does not match the current sbtix version; please rerun with the rebuilt sbtix tool.")
-        }
       }
 
       // Write generated nix
@@ -1248,16 +1255,6 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
             "[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access."
           }
         }
-      }
-      
-      // Automatically fix any IVY_LOCAL_BASE references in the generated file to use ivyDir
-      // This ensures compatibility regardless of which template or source is used
-      try {
-
-      } catch {
-        case e: Exception => 
-          log.error(s"[SBTIX_DEBUG genComposition] Error fixing IVY_LOCAL_BASE references: ${e.getMessage}")
-          e.printStackTrace()
       }
     },
     

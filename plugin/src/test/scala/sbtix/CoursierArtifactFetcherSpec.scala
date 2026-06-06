@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.{File, PrintWriter}
 import se.nullable.sbtix.Utils
 import se.nullable.sbtix.{CoursierArtifactFetcher, Dependency, NixArtifact, NixRepo}
-import sbt.librarymanagement.{MavenRepository, Patterns, ScalaModuleInfo}
+import sbt.librarymanagement.{ConfigRef, ConfigurationReport, MavenRepository, ModuleReport, Patterns, ScalaModuleInfo, UpdateReport, UpdateStats}
 import sbt.{Logger, ModuleID, Resolver}
 
 class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
@@ -41,7 +41,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     
     val dependencies = Set(
       Dependency(
-        ModuleID("com.lihaoyi", "upickle_2.12", "3.1.3")
+        ModuleID("com.lihaoyi", "upickle_2.12", "4.4.3")
       )
     )
     
@@ -50,7 +50,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger, 
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12"
     )
     
@@ -79,7 +79,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
 
     val dependencies = Set(
       Dependency(
-        ModuleID("com.typesafe", "config", "1.4.2")
+        ModuleID("com.typesafe", "config", "1.4.9")
       )
     )
 
@@ -87,7 +87,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12",
       artifactClassifiers = Seq("javadoc")
     )
@@ -114,7 +114,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       resolvers,
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12",
       artifactClassifiers = Seq.empty
     )
@@ -127,6 +127,129 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     withClue(s"metadata artifacts should not be pinned in repo.nix: $metadataArtifacts") {
       metadataArtifacts shouldBe empty
     }
+  }
+
+  it should "lock provided dependency jars discovered from cached POMs" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+
+    val dependencies = Set(
+      Dependency(
+        ModuleID("org.scala-sbt", "compiler-bridge_2.12", "1.12.0")
+      )
+    )
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, artifacts, provided, errors) = fetcher(dependencies)
+
+    errors.flatMap(_.errors) shouldBe empty
+    provided shouldBe empty
+    artifacts.map(_.relativePath) should contain allOf (
+      "org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.jar",
+      "org/scala-sbt/util-interface/1.11.5/util-interface-1.11.5.jar"
+    )
+  }
+
+  it should "lock direct dependency POM metadata discovered from cached POMs" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("net.bzzt", "reproducible-builds-jvm-stripper", "0.10")
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
+    val (_, artifacts) = fetcher.lockModulePoms(Set(module))
+    val relativePaths = artifacts.map(_.relativePath)
+
+    seedErrors.flatMap(_.errors) shouldBe empty
+    relativePaths should contain("org/codehaus/plexus/plexus-utils/3.4.2/plexus-utils-3.4.2.pom")
+    relativePaths should not contain "org/codehaus/plexus/plexus-utils/3.4.2/plexus-utils-3.4.2.jar"
+  }
+
+  it should "lock direct dependency jars from cached POMs when building plugin repositories" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("com.github.sbt", "sbt-native-packager", "1.11.7")
+      .withExtraAttributes(Map("scalaVersion" -> "2.12", "sbtVersion" -> "1.0"))
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      extraIvyProps = Map("scalaBinaryVersion" -> "2.12", "sbtBinaryVersion" -> "1.0"),
+      artifactClassifiers = Seq.empty,
+      lockPomDependencyArtifacts = true
+    )
+
+    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
+    val (_, artifacts) = fetcher.lockModulePoms(Set(module))
+    val relativePaths = artifacts.map(_.relativePath)
+
+    seedErrors.flatMap(_.errors) shouldBe empty
+    relativePaths should contain("org/scala-lang/modules/scala-xml_2.12/2.2.0/scala-xml_2.12-2.2.0.jar")
+    relativePaths should contain("org/apache/commons/commons-parent/85/commons-parent-85.pom")
+    relativePaths should contain("org/junit/junit-bom/5.13.1/junit-bom-5.13.1.pom")
+  }
+
+  it should "lock evicted update report POM metadata only when configured" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("commons-io", "commons-io", "2.11.0")
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+    val pluginFetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty,
+      lockEvictedModulePoms = true
+    )
+
+    val evictedReport = ModuleReport(module, Vector.empty, Vector.empty).withEvicted(true)
+    val report = UpdateReport(
+      new File("ivy.xml"),
+      Vector(ConfigurationReport(ConfigRef("compile"), Vector(evictedReport), Vector.empty)),
+      UpdateStats(0L, 0L, 0L, cached = true),
+      Map.empty
+    )
+    val (_, projectArtifacts) = fetcher.fromUpdateReport(report)
+    val (_, pluginArtifacts) = pluginFetcher.fromUpdateReport(report)
+    val projectRelativePaths = projectArtifacts.map(_.relativePath)
+    val pluginRelativePaths = pluginArtifacts.map(_.relativePath)
+
+    projectRelativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.pom"
+    pluginRelativePaths should contain("commons-io/commons-io/2.11.0/commons-io-2.11.0.pom")
+    pluginRelativePaths should not contain "commons-io/commons-io/2.11.0/commons-io-2.11.0.jar"
   }
 
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {
@@ -143,7 +266,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
       mockLogger,
       Set(sbtPluginReleases),
       Set.empty,
-      "2.12.20",
+      "2.12.21",
       "2.12"
     )
 

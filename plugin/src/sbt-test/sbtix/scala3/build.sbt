@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.3.4"
+ThisBuild / scalaVersion := "3.3.7"
 ThisBuild / version := "0.1.0"
 
 lazy val stage = taskKey[File]("Stage a minimal executable for sbtix buildSbtProgram")

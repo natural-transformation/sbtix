@@ -6,7 +6,7 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
-  sbtixSource = /nix/store/y79q681gg215gga362hqnqgidq5nzi99-source;
+  sbtixSource = /nix/store/0016c307449rq6hzqz1mik0h90s0ffax-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))
@@ -35,6 +35,20 @@ let
     if builtins.pathExists projectMetaRepoPath
     then import projectMetaRepoPath
     else {};
+  rootEntries = builtins.readDir ./.;
+  subprojectRepos =
+    builtins.concatLists (builtins.map (name:
+      let
+        entryType = builtins.getAttr name rootEntries;
+        repoPath = ./. + "/${name}/repo.nix";
+        projectRepoPath = ./. + "/${name}/project/repo.nix";
+      in
+        if entryType == "directory" && name != "project"
+        then
+          (optional (builtins.pathExists repoPath) (import repoPath))
+          ++ (optional (builtins.pathExists projectRepoPath) (import projectRepoPath))
+        else []
+    ) (builtins.attrNames rootEntries));
 
   pluginRepoPath = ./sbtix-plugin-repo.nix;
   pluginRepo =
@@ -44,6 +58,7 @@ let
 
   repositories =
     [ repoLock projectRepo projectMetaRepo ]
+    ++ subprojectRepos
     ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo
     ++ optional (pluginRepo != null) pluginRepo;
   
