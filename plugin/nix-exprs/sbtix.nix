@@ -129,7 +129,6 @@ in rec {
                     done | sort -u
                   )"
                   [ -n "$versions" ] || continue
-                  latest="$(printf '%s\n' "$versions" | tail -n 1)"
 
                   relative="''${moduleDir#"$repoRoot"/}"
                   groupPath="$(dirname "$relative")"
@@ -145,8 +144,6 @@ in rec {
                     [ -z "$groupId" ] || printf '  <groupId>%s</groupId>\n' "$groupId"
                     printf '  <artifactId>%s</artifactId>\n' "$module"
                     printf '%s\n' '  <versioning>'
-                    printf '    <latest>%s</latest>\n' "$latest"
-                    printf '    <release>%s</release>\n' "$latest"
                     printf '%s\n' '    <versions>'
                     printf '%s\n' "$versions" | while IFS= read -r version; do
                       printf '      <version>%s</version>\n' "$version"
