@@ -7,11 +7,13 @@ import sbt.librarymanagement.{ CrossVersion, Patterns, UpdateReport }
 import java.io.File
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.nio.charset.StandardCharsets
+import java.util.Properties
 import scala.sys.process._
 import scala.io.Source
 import sbt.io.syntax._
 import coursier.core.{Dependency => CoursierDependency, Module => CoursierCoreModule, ModuleName => CoursierModuleName, Organization => CoursierOrganization}
 import sbt.plugins.JvmPlugin
+import scala.util.Try
 
 /**
  * The main plugin for Sbtix, which provides Nix integration for SBT.
@@ -468,16 +470,46 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       }
       .getOrElse(Set.empty)
 
-  private def sbtBridgeModuleName(scalaVersion: String): Option[String] =
+  private def scala213UsesBinaryBridge(scalaVersion: String): Boolean =
+    Try(scalaVersion.stripPrefix("2.13.").takeWhile(_.isDigit).toInt).toOption.exists(_ >= 12)
+
+  private def compilerBridgeModuleName(scalaVersion: String): Option[String] =
     scalaVersion match {
-      case version if version.startsWith("3.")    => Some("scala3-sbt-bridge")
-      case version if version.startsWith("2.13.") => Some("scala2-sbt-bridge")
+      case version if version.startsWith("2.10.") => Some("compiler-bridge_2.10")
+      case version if version.startsWith("2.11.") => Some("compiler-bridge_2.11")
+      case version if version.startsWith("2.12.") => Some("compiler-bridge_2.12")
+      case "2.13.0-M1"                            => Some("compiler-bridge_2.12")
+      case version if version.startsWith("2.13.") => Some("compiler-bridge_2.13")
       case _                                      => None
     }
 
+  private def zincComponentVersion(log: Logger): Option[String] = {
+    Option(getClass.getResourceAsStream("/incrementalcompiler.version.properties")) match {
+      case Some(input) =>
+        try {
+          val properties = new Properties()
+          properties.load(input)
+          Option(properties.getProperty("version")).filter(_.nonEmpty)
+        } finally input.close()
+      case None =>
+        SbtixDebug.warn(log) {
+          "[SBTIX_DEBUG] Could not locate incrementalcompiler.version.properties; Scala 2 compiler bridge tooling will not be locked explicitly."
+        }
+        None
+    }
+  }
+
   private def sbtToolingDependencies(scalaVersion: String, log: Logger): Set[Dependency] =
-    sbtBridgeModuleName(scalaVersion).map { bridgeName =>
-      val bridge = ModuleID("org.scala-lang", bridgeName, scalaVersion)
+    (scalaVersion match {
+      case version if version.startsWith("3.") =>
+        Some(ModuleID("org.scala-lang", "scala3-sbt-bridge", version))
+      case version if version.startsWith("2.13.") && scala213UsesBinaryBridge(version) =>
+        Some(ModuleID("org.scala-lang", "scala2-sbt-bridge", version))
+      case version =>
+        compilerBridgeModuleName(version).flatMap { bridgeName =>
+          zincComponentVersion(log).map(ModuleID("org.scala-sbt", bridgeName, _))
+        }
+    }).map { bridge =>
       SbtixDebug.info(log) {
         s"[SBTIX_DEBUG] Adding sbt tooling dependency for offline Scala builds: ${bridge.organization}:${bridge.name}:${bridge.revision}"
       }
@@ -599,7 +631,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
       credentials: Set[Credentials],
       scalaVersion: String,
       scalaBinaryVersion: String,
-      extraIvyProps: Map[String, String] = Map.empty
+      extraIvyProps: Map[String, String] = Map.empty,
+      lockPomDependencyArtifacts: Boolean = false
   ) {
     private def fetcher(artifactClassifiers: Seq[String]): CoursierArtifactFetcher =
       new CoursierArtifactFetcher(
@@ -609,7 +642,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         scalaVersion,
         scalaBinaryVersion,
         extraIvyProps = extraIvyProps,
-        artifactClassifiers = artifactClassifiers
+        artifactClassifiers = artifactClassifiers,
+        lockPomDependencyArtifacts = lockPomDependencyArtifacts
       )
 
     def resolveDependencies(fetch: DependencyFetch): FetchResult =
@@ -764,7 +798,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         credentials,
         scalaVersion,
         scalaBinaryVersion,
-        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion)
+        extraIvyProps = pluginIvyProperties(scalaBinaryVersion, sbtBinaryVersion),
+        lockPomDependencyArtifacts = true
       )
     val result = fetchPluginPlan(
       pluginFetchPlan(pluginModuleIds, updateReport, artifactClassifiers),

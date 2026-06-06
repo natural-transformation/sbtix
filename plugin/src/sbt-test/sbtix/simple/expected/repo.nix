@@ -9,10 +9,6 @@
   };
 
   "artifacts" = {
-    "nix-public/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.pom" = {
-      url = "https://repo1.maven.org/maven2/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.pom";
-      sha256 = "19889DBDF1B254B2601A5EE645B8147A974644882297684C798AFE5D63D78DFE";
-    };
     "nix-public/io/github/java-diff-utils/java-diff-utils-parent/4.16/java-diff-utils-parent-4.16.pom" = {
       url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils-parent/4.16/java-diff-utils-parent-4.16.pom";
       sha256 = "A4344DA58E53A8E8C57BE19E923BADF24B27DD42B07DE6D446D2A659A456509A";
@@ -29,33 +25,9 @@
       url = "https://repo1.maven.org/maven2/io/github/java-diff-utils/java-diff-utils/4.16/java-diff-utils-4.16.pom";
       sha256 = "434D598A1E1813111385235161627A4C4EBD62134F7054428D3E202B32CF39DE";
     };
-    "nix-public/org/fusesource/fusesource-pom/1.12/fusesource-pom-1.12.pom" = {
-      url = "https://repo1.maven.org/maven2/org/fusesource/fusesource-pom/1.12/fusesource-pom-1.12.pom";
-      sha256 = "C40D960DAADCEF7B01C1B1C6657AFBAC4FFFB5E53168F8FCB0B28B84E6FDCCA1";
-    };
-    "nix-public/org/fusesource/jansi/jansi/2.4.1/jansi-2.4.1.pom" = {
-      url = "https://repo1.maven.org/maven2/org/fusesource/jansi/jansi/2.4.1/jansi-2.4.1.pom";
-      sha256 = "3F98D979A4D3559F8779FBB004B34AE7516AFADF510E11DF7CC3CD073EB1BB3B";
-    };
-    "nix-public/org/jline/jline-native/3.29.0/jline-native-3.29.0.pom" = {
-      url = "https://repo1.maven.org/maven2/org/jline/jline-native/3.29.0/jline-native-3.29.0.pom";
-      sha256 = "5825548C79A919B6B1D8B7C0904BE72A1DE43E84AB5525923C2F91279F38DC83";
-    };
     "nix-public/org/jline/jline-parent/3.29.0/jline-parent-3.29.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/jline/jline-parent/3.29.0/jline-parent-3.29.0.pom";
       sha256 = "7922EFD3D870A7D7AE03B196C300E35C5DE0228E59A5B012AEA641E36D79928E";
-    };
-    "nix-public/org/jline/jline-reader/3.29.0/jline-reader-3.29.0.pom" = {
-      url = "https://repo1.maven.org/maven2/org/jline/jline-reader/3.29.0/jline-reader-3.29.0.pom";
-      sha256 = "D722F49A91292CFC69DA0E33A61B788DD4253E8174161639F640B21D461CC429";
-    };
-    "nix-public/org/jline/jline-terminal-jni/3.29.0/jline-terminal-jni-3.29.0.pom" = {
-      url = "https://repo1.maven.org/maven2/org/jline/jline-terminal-jni/3.29.0/jline-terminal-jni-3.29.0.pom";
-      sha256 = "4DBEC22363D2FA1C4E2C89212F2626BC37F8D52D4DC43E8D87DF77AC64FFAFA4";
-    };
-    "nix-public/org/jline/jline-terminal/3.29.0/jline-terminal-3.29.0.pom" = {
-      url = "https://repo1.maven.org/maven2/org/jline/jline-terminal/3.29.0/jline-terminal-3.29.0.pom";
-      sha256 = "7BFA6055D005E2C8FE4A6EFC692AE6EFD7F543E3940FB55ECCA09D58C78CB0FE";
     };
     "nix-public/org/jline/jline/3.29.0/jline-3.29.0-jdk8.jar" = {
       url = "https://repo1.maven.org/maven2/org/jline/jline/3.29.0/jline-3.29.0-jdk8.jar";
@@ -149,9 +121,21 @@
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala2-sbt-bridge/2.13.18/scala2-sbt-bridge-2.13.18.pom";
       sha256 = "8B2EE964F62EFBD3D23DC37A2AFF3230599B9B01B61340DB237C0090CC4B2BC9";
     };
+    "nix-public/org/scala-sbt/compiler-interface/1.10.8/compiler-interface-1.10.8.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/compiler-interface/1.10.8/compiler-interface-1.10.8.jar";
+      sha256 = "B7569D4E2513391C11D14561013923841A6D7ECE3B1D556BB054C3E3CC9D28E9";
+    };
+    "nix-public/org/scala-sbt/compiler-interface/1.10.8/compiler-interface-1.10.8.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/compiler-interface/1.10.8/compiler-interface-1.10.8.pom";
+      sha256 = "1A2F589110C486973C1B75A86F63E1A7DBF0F16289C1708B5F953DFA1A5FFCDF";
+    };
     "nix-public/org/scala-sbt/test-interface/1.0/test-interface-1.0.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-sbt/test-interface/1.0/test-interface-1.0.pom";
       sha256 = "61BA06A9D0C226E10F048004FCEBFB300FDD9B077D05ED502E9875324C8B762E";
+    };
+    "nix-public/org/scala-sbt/util-interface/1.10.7/util-interface-1.10.7.pom" = {
+      url = "https://repo1.maven.org/maven2/org/scala-sbt/util-interface/1.10.7/util-interface-1.10.7.pom";
+      sha256 = "D49470C815E070E44F9501116C83F35B179413F5AAFE95E29AC293C67CC16297";
     };
     "nix-public/org/scalactic/scalactic_2.13/3.2.20/scalactic-3.2.20-sources.jar" = {
       url = "https://repo1.maven.org/maven2/org/scalactic/scalactic_2.13/3.2.20/scalactic_2.13-3.2.20-sources.jar";
@@ -524,26 +508,6 @@
     "nix-public/org/scalatest/scalatest_2.13/3.2.20/scalatest_2.13-3.2.20.pom" = {
       url = "https://repo1.maven.org/maven2/org/scalatest/scalatest_2.13/3.2.20/scalatest_2.13-3.2.20.pom";
       sha256 = "4D8D839105D9719F949A04A30EC99F5C2E766A59FAE6AEA65769F8CCC8E2E3F3";
-    };
-    "nix-public/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.pom" = {
-      url = "https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.16/slf4j-api-2.0.16.pom";
-      sha256 = "B1A00F5B1C4DBE62B805D65D23911A6F77063889D7CB1E86FE8389D6190473F7";
-    };
-    "nix-public/org/slf4j/slf4j-bom/2.0.16/slf4j-bom-2.0.16.pom" = {
-      url = "https://repo1.maven.org/maven2/org/slf4j/slf4j-bom/2.0.16/slf4j-bom-2.0.16.pom";
-      sha256 = "0566048EC825CDF28758620AF64D9E14AE38A9CD8748DD6FAFA6DF4A4194C279";
-    };
-    "nix-public/org/slf4j/slf4j-parent/2.0.16/slf4j-parent-2.0.16.pom" = {
-      url = "https://repo1.maven.org/maven2/org/slf4j/slf4j-parent/2.0.16/slf4j-parent-2.0.16.pom";
-      sha256 = "09A0B4CC814D7274616C9B16D4C0FD9AAF1ECC813334DE5131E547271B1982E5";
-    };
-    "nix-public/org/slf4j/slf4j-simple/2.0.16/slf4j-simple-2.0.16.pom" = {
-      url = "https://repo1.maven.org/maven2/org/slf4j/slf4j-simple/2.0.16/slf4j-simple-2.0.16.pom";
-      sha256 = "CF6C553148E8A77951CFDA131D209481981FD6E2C02A7B48DC6D6605523CDF1C";
-    };
-    "nix-public/org/sonatype/oss/oss-parent/7/oss-parent-7.pom" = {
-      url = "https://repo1.maven.org/maven2/org/sonatype/oss/oss-parent/7/oss-parent-7.pom";
-      sha256 = "B51F8867C92B6A722499557FC3A1FDEA77BDF9EF574722FE90CE436A29559454";
     };
   };
 }

@@ -1657,6 +1657,10 @@
       url = "https://repo1.maven.org/maven2/org/scala-lang/modules/scala-xml_2.12/2.3.0/scala-xml_2.12-2.3.0.pom";
       sha256 = "45BC645F881F34E6338B478007C6DD93D17389A4F4138616AE7EFA854BAAAA46";
     };
+    "nix-public/org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.jar";
+      sha256 = "C88676D75C69721B717EA6C441ECE04FFF262ABAB9D210A2936ABC2BE3731FA2";
+    };
     "nix-public/org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.pom";
       sha256 = "D04B837110423B145973F9A6516AB6AFD9C09C50543B8C7C63AC6C90AD4CCAA3";
@@ -1680,6 +1684,10 @@
     "nix-public/org/scala-lang/scala-library/2.12.18/scala-library-2.12.18.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.12.18/scala-library-2.12.18.pom";
       sha256 = "C7BCAE55EB71211DCB3305FD5EAFF1ADD551C53A8B6173C1C02D800C6EACF097";
+    };
+    "nix-public/org/scala-lang/scala-library/2.12.20/scala-library-2.12.20.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.12.20/scala-library-2.12.20.jar";
+      sha256 = "4D8A8F984CCE31A329A24F10B0BF336F042CB62AEB435290A1B20243154CFCCB";
     };
     "nix-public/org/scala-lang/scala-library/2.12.20/scala-library-2.12.20.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.12.20/scala-library-2.12.20.pom";
@@ -1712,6 +1720,10 @@
     "nix-public/org/scala-lang/scala-library/2.13.6/scala-library-2.13.6.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-library/2.13.6/scala-library-2.13.6.pom";
       sha256 = "8021CD27867F1503C906E5A9881933309F2AD7DACA20CA13C96B81FBDC5EC9E8";
+    };
+    "nix-public/org/scala-lang/scala-reflect/2.12.20/scala-reflect-2.12.20.jar" = {
+      url = "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.12.20/scala-reflect-2.12.20.jar";
+      sha256 = "5F1914CDC7A70580EA6038D929EBB25736ECF2234F677E2D47F8A4B2BC81E1FB";
     };
     "nix-public/org/scala-lang/scala-reflect/2.12.20/scala-reflect-2.12.20.pom" = {
       url = "https://repo1.maven.org/maven2/org/scala-lang/scala-reflect/2.12.20/scala-reflect-2.12.20.pom";

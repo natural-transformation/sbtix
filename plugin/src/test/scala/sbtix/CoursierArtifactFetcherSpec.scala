@@ -129,6 +129,83 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "lock provided dependency jars discovered from cached POMs" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+
+    val dependencies = Set(
+      Dependency(
+        ModuleID("org.scala-sbt", "compiler-bridge_2.12", "1.12.0")
+      )
+    )
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, artifacts, provided, errors) = fetcher(dependencies)
+
+    errors.flatMap(_.errors) shouldBe empty
+    provided shouldBe empty
+    artifacts.map(_.relativePath) should contain allOf (
+      "org/scala-lang/scala-compiler/2.12.20/scala-compiler-2.12.20.jar",
+      "org/scala-sbt/util-interface/1.11.5/util-interface-1.11.5.jar"
+    )
+  }
+
+  it should "lock direct dependency POM metadata discovered from cached POMs" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("net.bzzt", "reproducible-builds-jvm-stripper", "0.10")
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty
+    )
+
+    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
+    val (_, artifacts) = fetcher.lockModulePoms(Set(module))
+    val relativePaths = artifacts.map(_.relativePath)
+
+    seedErrors.flatMap(_.errors) shouldBe empty
+    relativePaths should contain("org/codehaus/plexus/plexus-utils/3.4.2/plexus-utils-3.4.2.pom")
+    relativePaths should not contain "org/codehaus/plexus/plexus-utils/3.4.2/plexus-utils-3.4.2.jar"
+  }
+
+  it should "lock direct dependency jars from cached POMs when building plugin repositories" in {
+    val resolvers = Set[Resolver](
+      MavenRepository("central", "https://repo1.maven.org/maven2")
+    )
+    val module = ModuleID("com.github.sbt", "sbt-native-packager_2.12_1.0", "1.11.7")
+
+    val fetcher = new CoursierArtifactFetcher(
+      mockLogger,
+      resolvers,
+      Set.empty,
+      "2.12.21",
+      "2.12",
+      artifactClassifiers = Seq.empty,
+      lockPomDependencyArtifacts = true
+    )
+
+    val (_, _, _, seedErrors) = fetcher(Set(Dependency(module)))
+    val (_, artifacts) = fetcher.lockModulePoms(Set(module))
+
+    seedErrors.flatMap(_.errors) shouldBe empty
+    artifacts.map(_.relativePath) should contain("org/scala-lang/modules/scala-xml_2.12/2.2.0/scala-xml_2.12-2.2.0.jar")
+  }
+
   it should "preserve Ivy resolver patterns for sbt plugin repositories" in {
     val ivyPattern =
       "[organisation]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)([branch]/)[revision]/[type]s/[artifact](-[classifier]).[ext]"
