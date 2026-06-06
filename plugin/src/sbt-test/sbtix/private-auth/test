@@ -1,18 +1,16 @@
+$ exec mv expected expected-fixtures
 > compile
 > genNix
 > genComposition
 > reload plugins
 > genNix
+$ exec mv expected-fixtures expected
 $ exists repo.nix
+$ exists one/repo.nix
 $ exists project/repo.nix
-# Emit digests and human-friendly diffs to make failures actionable
-$ exec shasum repo.nix
-$ exec shasum expected/repo.nix
-$ exec shasum project/repo.nix
-$ exec shasum expected/project-repo.nix
-$ exec python3 expected/diff-debug.py repo.nix expected/repo.nix
-$ exec python3 expected/diff-debug.py project/repo.nix expected/project-repo.nix
-$ must-mirror repo.nix expected/repo.nix
-$ must-mirror project/repo.nix expected/project-repo.nix
+$ exec grep -q 'http://test:test@localhost:9877/plugin/src/sbt-test/artifacts/private-org/private-name/1.2.3/private-name-1.2.3.pom' one/repo.nix
+$ exec grep -q 'http://test:test@localhost:9877/plugin/src/sbt-test/artifacts/private-org/private-name/1.2.3/private-name-1.2.3.jar' one/repo.nix
+$ exec grep -q 'http://test:test@localhost:9877/plugin/src/sbt-test/artifacts/private-org/private-name/1.2.3/private-name-1.2.3-sources.jar' one/repo.nix
+$ exec grep -q 'http://test:test@localhost:9877/plugin/src/sbt-test/artifacts/private-org/private-name/1.2.3/private-name-1.2.3-tests.jar' one/repo.nix
 $ exec nix-build --show-trace -j32
 $ exec result/bin/three

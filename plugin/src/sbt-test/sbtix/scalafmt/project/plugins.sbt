@@ -5,5 +5,7 @@ sys.props.get("plugin.version") match {
 
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.6")
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.10.0")
+addSbtPlugin("net.vonbuchholtz" % "sbt-dependency-check" % "5.1.0")
 
 resolvers += Resolver.sbtPluginRepo("releases")
+resolvers += "Jaspersoft third-party" at "https://jaspersoft.jfrog.io/jaspersoft/third-party-ce-artifacts/"

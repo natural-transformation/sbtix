@@ -4,7 +4,8 @@ import scala.language.postfixOps
 import scala.language.implicitConversions
 
 import java.io.{File, FileOutputStream}
-import java.net.{URI, URL}
+import java.net.{URI, URL, URLEncoder}
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.nio.file.{Files => NioFiles}
 import java.util.concurrent.{ConcurrentSkipListSet, ExecutorService}
@@ -15,14 +16,14 @@ import scala.util.control.NonFatal
 import scala.util.Try
 
 import sbt.{uri, Credentials, Logger, ModuleID, Resolver}
-import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, PatternsBasedRepository, URLRepository, UpdateReport}
+import sbt.librarymanagement.{CrossVersion, FileRepository, MavenRepository, ModuleReport, PatternsBasedRepository, URLRepository, UpdateReport}
 
 import coursier.cache.{Cache, CacheDefaults, CacheLogger, CachePolicy, FileCache}
-import coursier.core.{Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
+import coursier.core.{Authentication => CAuthentication, Classifier, Configuration, Dependency => CDependency, Module => CModule, ModuleName, Organization, Publication, Repository, Resolution, Type, Extension}
 import coursier.core.ResolutionProcess
 import coursier.util.{Artifact => CArtifact, EitherT, Task}
 
-import lmcoursier.internal.shaded.coursier.core.Authentication
+import lmcoursier.internal.shaded.coursier.core.{Authentication => SbtCoursierAuthentication}
 import lmcoursier.internal.Resolvers
 
 import se.nullable.sbtix.data.RoseTree
@@ -37,32 +38,95 @@ case class MetaArtifact(artifactUrl: String, checkSum: String) extends Comparabl
   /** Minimal POM model to capture parents and import-scoped BOMs. */
   private object PomModel {
     final case class PomDep(groupId: String, artifactId: String, version: String, scope: String = "", `type`: String = "pom")
-    final case class Model(parents: List[PomDep], importBoms: Set[PomDep], optionalDeps: Set[PomDep])
+    final case class Model(
+        parents: List[PomDep],
+        importBoms: Set[PomDep],
+        optionalDeps: Set[PomDep],
+        versionRangeDeps: Set[PomDep],
+        properties: Map[String, String]
+    )
 
-    def parse(file: File): Model = {
+    def parse(file: File, inheritedProperties: Map[String, String] = Map.empty): Model = {
       val xml = scala.xml.XML.loadFile(file)
-      val parent = (xml \ "parent").headOption.map { p =>
+      def childText(node: scala.xml.Node, label: String): Option[String] =
+        (node \ label).headOption.map(_.text.trim).filter(_.nonEmpty)
+
+      val rawParent = (xml \ "parent").headOption.map { p =>
         PomDep(
-          (p \ "groupId").text.trim,
-          (p \ "artifactId").text.trim,
-          (p \ "version").text.trim
+          childText(p, "groupId").getOrElse(""),
+          childText(p, "artifactId").getOrElse(""),
+          childText(p, "version").getOrElse("")
         )
-      }.toList
-      val deps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map { d =>
+      }
+      val rawProperties =
+        (xml \ "properties").headOption
+          .map(_.child.collect { case elem: scala.xml.Elem if elem.text.trim.nonEmpty => elem.label -> elem.text.trim }.toMap)
+          .getOrElse(Map.empty[String, String])
+      val projectProperties =
+        Map(
+          "project.groupId" -> childText(xml, "groupId").orElse(rawParent.map(_.groupId)),
+          "pom.groupId" -> childText(xml, "groupId").orElse(rawParent.map(_.groupId)),
+          "project.artifactId" -> childText(xml, "artifactId"),
+          "pom.artifactId" -> childText(xml, "artifactId"),
+          "project.version" -> childText(xml, "version").orElse(rawParent.map(_.version)),
+          "pom.version" -> childText(xml, "version").orElse(rawParent.map(_.version))
+        ).collect { case (key, Some(value)) if value.nonEmpty => key -> value }
+      val properties = resolveProperties(inheritedProperties ++ rawProperties ++ projectProperties)
+
+      def interpolate(value: String): String =
+        propertyPattern.replaceAllIn(
+          value,
+          m => java.util.regex.Matcher.quoteReplacement(properties.getOrElse(m.group(1), m.matched))
+        )
+
+      def parseDep(d: scala.xml.Node): PomDep =
         PomDep(
-          (d \ "groupId").text.trim,
-          (d \ "artifactId").text.trim,
-          (d \ "version").text.trim,
-          scope = (d \ "scope").text.trim,
-          `type` = (d \ "type").text.trim match {
+          interpolate(childText(d, "groupId").getOrElse("")),
+          interpolate(childText(d, "artifactId").getOrElse("")),
+          interpolate(childText(d, "version").getOrElse("")),
+          scope = interpolate(childText(d, "scope").getOrElse("")),
+          `type` = interpolate(childText(d, "type").getOrElse("")) match {
             case "" => "pom"
             case other => other
           }
         )
-      }.toSet
-      val importBoms = deps.filter(d => d.scope == "import" && d.`type` == "pom")
-      val optionalDeps = deps.filter(d => d.scope == "optional" || (d.scope.isEmpty && d.`type` == "pom"))
-      Model(parent, importBoms, optionalDeps)
+
+      val parent = rawParent.map { p =>
+        p.copy(
+          groupId = interpolate(p.groupId),
+          artifactId = interpolate(p.artifactId),
+          version = interpolate(p.version)
+        )
+      }.toList
+      val managedDeps = (xml \ "dependencyManagement" \ "dependencies" \ "dependency").map(parseDep).toSet
+      val directDeps = (xml \ "dependencies" \ "dependency").map(parseDep).toSet
+      val deps = managedDeps ++ directDeps
+      val importBoms = managedDeps.filter(d => d.scope == "import" && d.`type` == "pom")
+      val optionalDeps =
+        deps.filter(d => d.scope == "optional" || (d.scope.isEmpty && d.`type` == "pom"))
+      val versionRangeDeps = deps.filter(d => isVersionRange(d.version))
+      Model(parent, importBoms, optionalDeps, versionRangeDeps, properties)
+    }
+
+    private val propertyPattern = "\\$\\{([^}]+)\\}".r
+
+    private def isVersionRange(version: String): Boolean =
+      version.startsWith("[") || version.startsWith("(")
+
+    private def resolveProperties(properties: Map[String, String]): Map[String, String] = {
+      @annotation.tailrec
+      def loop(current: Map[String, String], remaining: Int): Map[String, String] = {
+        val next = current.map { case (key, value) =>
+          key -> propertyPattern.replaceAllIn(
+            value,
+            m => java.util.regex.Matcher.quoteReplacement(current.getOrElse(m.group(1), m.matched))
+          )
+        }
+        if (next == current || remaining <= 0) next
+        else loop(next, remaining - 1)
+      }
+
+      loop(properties, 8)
     }
   }
 
@@ -100,6 +164,8 @@ class CoursierArtifactFetcher(
 ) {
 
   private val metaArtifactCollector = new ConcurrentSkipListSet[MetaArtifact]()
+  private val pomModelCache = scala.collection.mutable.Map.empty[String, PomModel.Model]
+  private val pomAncestorCache = scala.collection.mutable.Map.empty[String, Set[NixArtifact]]
   private val ivyLocalResolver: Resolver =
     Resolver.file(
       "sbtix-ivy-local",
@@ -185,21 +251,52 @@ class CoursierArtifactFetcher(
   def fromUpdateReport(report: UpdateReport): (Set[NixRepo], Set[NixArtifact]) = {
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
-    val artifacts =
+    val moduleReports =
       report.configurations
         .flatMap(_.modules)
         .filterNot(_.evicted)
-        .flatMap { moduleReport =>
-          moduleReport.artifacts.flatMap { case (artifact, file) =>
-            artifact.url.toSeq.flatMap { url =>
-              lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
-            }
+
+    val reportArtifacts =
+      moduleReports.flatMap { moduleReport =>
+        moduleReport.artifacts.flatMap { case (artifact, file) =>
+          artifact.url.toSeq.flatMap { url =>
+            lockReportArtifact(url.toString, file, moduleReport.module, repoDescriptors)
           }
         }
+      }
+
+    val modulePomArtifacts =
+      moduleReports.flatMap { moduleReport =>
+        cachedModulePoms(moduleReport.module, repoDescriptors).flatMap { case (url, file) =>
+          lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
+        }
+      }
+
+    val classifierArtifacts =
+      lockUpdateReportClassifiers(moduleReports, repoDescriptors)
+
+    val artifacts =
+      (reportArtifacts ++ modulePomArtifacts ++ classifierArtifacts)
         .toSet
 
     SbtixDebug.info(logger) {
-      s"[SBTIX_DEBUG] Locked ${artifacts.size} artifacts from already-resolved sbt plugin update report"
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} artifacts from already-resolved update report"
+    }
+    (nixRepos, artifacts)
+  }
+
+  def lockModulePoms(modules: Set[ModuleID]): (Set[NixRepo], Set[NixArtifact]) = {
+    val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
+    val nixRepos = repoDescriptors.map(_.repo).toSet
+    val artifacts =
+      modules.flatMap { module =>
+        cachedModulePoms(module, repoDescriptors).flatMap { case (url, file) =>
+          lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
+        }
+      }
+
+    SbtixDebug.info(logger) {
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} cached module POM artifacts"
     }
     (nixRepos, artifacts)
   }
@@ -693,10 +790,11 @@ class CoursierArtifactFetcher(
   /** Download an artifact, emit its NixArtifact(s), and for POMs also emit parent and import-scope BOMs. */
   private def fetchAndExpand(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor], dep: CDependency): Set[NixArtifact] = {
     val base = downloadArtifact(artifact).map { file =>
-      val descriptor = descriptorForUrl(artifact.url, repoDescriptors)
-      val relative = computeRelativePath(artifact.url, descriptor)
+      val artifactUrl = authenticatedArtifactUrl(artifact.url)
+      val descriptor = descriptorForUrl(artifactUrl, repoDescriptors)
+      val relative = computeRelativePath(artifactUrl, descriptor)
       val sha256 = computeSha256(file)
-      expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifact.url, sha256))
+      expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifactUrl, sha256))
     }.getOrElse(Set.empty)
 
     val pomExtras =
@@ -757,11 +855,116 @@ class CoursierArtifactFetcher(
       file: File,
       repoDescriptors: Seq[RepoDescriptor]
   ): Set[NixArtifact] = {
-    val descriptor = descriptorForUrl(url, repoDescriptors)
-    val relative = computeRelativePath(url, descriptor)
+    val artifactUrl = authenticatedArtifactUrl(url)
+    val descriptor = descriptorForUrl(artifactUrl, repoDescriptors)
+    val relative = computeRelativePath(artifactUrl, descriptor)
     val sha256 = computeSha256(file)
-    expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
+    expandCrossSuffixed(NixArtifact(descriptor.name, relative, artifactUrl, sha256))
   }
+
+  private def lockUpdateReportClassifiers(
+      moduleReports: Seq[ModuleReport],
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[NixArtifact] = {
+    val classifiers = artifactClassifiers.distinct
+    if (classifiers.isEmpty) Set.empty[NixArtifact]
+    else {
+      // The update report is the resolved module/version graph. Use it only to choose
+      // coordinates; every classifier artifact is fetched and recorded with a sha256 so
+      // the generated Nix expression remains content-verified.
+      val candidateUrls =
+        moduleReports
+          .flatMap(_.artifacts)
+          .flatMap { case (artifact, _) =>
+            artifact.url.toSeq.flatMap(url => classifierUrls(url.toString, classifiers))
+          }
+          .toSet
+
+      val artifacts: Set[NixArtifact] =
+        candidateUrls.flatMap { url =>
+          downloadArtifact(artifactForUrl(url))
+            .map(file => lockCachedArtifact(url, file, repoDescriptors))
+            .getOrElse(Set.empty[NixArtifact])
+        }
+
+      SbtixDebug.info(logger) {
+        s"[SBTIX_DEBUG] Locked ${artifacts.size} classifier artifacts from update-report modules"
+      }
+      artifacts
+    }
+  }
+
+  private def classifierUrls(url: String, classifiers: Seq[String]): Set[String] = {
+    val cleanUrl = url.takeWhile(ch => ch != '?' && ch != '#')
+    if (!shouldLockReportArtifact(cleanUrl) || !cleanUrl.endsWith(".jar")) Set.empty[String]
+    else {
+      val slash = cleanUrl.lastIndexOf('/')
+      if (slash < 0) Set.empty[String]
+      else {
+        val dir = cleanUrl.substring(0, slash + 1)
+        val file = cleanUrl.substring(slash + 1)
+        val base = file.stripSuffix(".jar")
+        classifiers
+          .filterNot(classifier => base.endsWith(s"-$classifier"))
+          .map { classifier =>
+            val classifierDir = ivyClassifierDirectory(dir, classifier).getOrElse(dir)
+            s"$classifierDir$base-$classifier.jar"
+          }
+          .toSet
+      }
+    }
+  }
+
+  private def ivyClassifierDirectory(dir: String, classifier: String): Option[String] = {
+    if (dir.endsWith("/jars/")) {
+      val artifactType = classifier match {
+        case "sources" => "srcs"
+        case "javadoc" => "docs"
+        case other => s"${other}s"
+      }
+      Some(dir.stripSuffix("/jars/") + s"/$artifactType/")
+    } else None
+  }
+
+  private def artifactForUrl(url: String): CArtifact = {
+    val artifactUrl = authenticatedArtifactUrl(url)
+    CArtifact(
+      url = artifactUrl,
+      checksumUrls = Map.empty[String, String],
+      extra = Map.empty[String, CArtifact],
+      changing = false,
+      optional = true,
+      authentication = artifactAuthenticationForUrl(url)
+    )
+  }
+
+  private def artifactAuthenticationForUrl(url: String): Option[CAuthentication] =
+    hostFromUrl(url).flatMap(credentialsForArtifactHost)
+
+  private def credentialsForArtifactHost(host: String): Option[CAuthentication] =
+    Credentials.forHost(credentials.toSeq, host).map { c =>
+      CAuthentication(
+        user = c.userName,
+        passwordOpt = Some(c.passwd),
+        realmOpt = Option(c.realm),
+        optional = false,
+        httpHeaders = Nil,
+        httpsOnly = false,
+        passOnRedirect = false
+      )
+    }
+
+  private def authenticatedArtifactUrl(url: String): String =
+    Try(new URI(url)).toOption
+      .filter(uri => Option(uri.getUserInfo).isEmpty)
+      .filter(uri => Option(uri.getScheme).exists(s => s == "http" || s == "https"))
+      .flatMap(uri => Option(uri.getHost).flatMap(host => Credentials.forHost(credentials.toSeq, host)))
+      .map { c =>
+        val scheme = url.takeWhile(_ != ':')
+        val prefix = s"$scheme://"
+        s"$prefix${c.userName}:${c.passwd}@${url.stripPrefix(prefix)}"
+      }
+      .getOrElse(url)
 
   private def cachedMavenPom(
       module: ModuleID,
@@ -776,6 +979,18 @@ class CoursierArtifactFetcher(
 
     (Set(moduleUrl) ++ artifactUrlPom.toSet)
       .flatMap(url => cachedFileForUrl(url).filter(_.isFile).map(file => (url, file)))
+  }
+
+  private def cachedModulePoms(
+      module: ModuleID,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] = {
+    val modulePath =
+      s"${module.organization.replace('.', '/')}/${module.name}/${module.revision}/${module.name}-${module.revision}.pom"
+    repoDescriptors.flatMap { descriptor =>
+      val url = descriptor.normalizedRoot + modulePath
+      cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+    }.toSet
   }
 
   private def pomUrlFromArtifactUrl(module: ModuleID, artifactUrl: String): Option[String] = {
@@ -797,49 +1012,110 @@ class CoursierArtifactFetcher(
       repoDescriptors: Seq[RepoDescriptor],
       seen: Set[String] = Set.empty
   ): Set[NixArtifact] = {
-    val pom = PomModel.parse(pomFile)
-    val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
+    if (seen.isEmpty)
+      pomAncestorCache.getOrElseUpdate(pomFile.getCanonicalPath, collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen))
+    else
+      collectCachedPomAncestorsUncached(pomFile, repoDescriptors, seen)
+  }
+
+  private def collectCachedPomAncestorsUncached(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): Set[NixArtifact] = {
+    val pom = cachedPomModel(pomFile, repoDescriptors, seen)
     val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
     candidates.flatMap { pomDep =>
-      val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
-      val path =
-        s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension"
-      val url = descriptor.normalizedRoot + path
-      if (seen(url)) Set.empty[NixArtifact]
-      else {
-        cachedFileForUrl(url).filter(_.isFile).map { file =>
+      cachedPomCandidates(pomDep, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++
             (if (url.endsWith(".pom")) collectCachedPomAncestors(file, repoDescriptors, seen + url) else Set.empty)
-        }.getOrElse(Set.empty)
       }
     }.toSet
   }
 
+  private def cachedPomModel(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): PomModel.Model =
+    pomModelCache.getOrElseUpdate(pomFile.getCanonicalPath, parsePomWithInheritedProperties(pomFile, repoDescriptors, seen))
+
+  private def parsePomWithInheritedProperties(
+      pomFile: File,
+      repoDescriptors: Seq[RepoDescriptor],
+      seen: Set[String]
+  ): PomModel.Model = {
+    val firstPass = PomModel.parse(pomFile)
+    val inheritedProperties =
+      firstPass.parents.flatMap { parent =>
+        cachedPomCandidates(parent, repoDescriptors).filterNot { case (url, _) => seen(url) }.flatMap { case (url, file) =>
+          cachedPomModel(file, repoDescriptors, seen + url).properties
+        }
+      }.toMap
+    if (inheritedProperties.isEmpty) firstPass
+    else PomModel.parse(pomFile, inheritedProperties)
+  }
+
+  private def cachedPomCandidates(
+      pomDep: PomModel.PomDep,
+      repoDescriptors: Seq[RepoDescriptor]
+  ): Set[(String, File)] =
+    pomPath(pomDep).map { path =>
+      repoDescriptors.flatMap { descriptor =>
+        val url = descriptor.normalizedRoot + path
+        cachedFileForUrl(url).filter(_.isFile).map(file => (url, file))
+      }.toSet
+    }.getOrElse(Set.empty)
+
+  private def pomPath(pomDep: PomModel.PomDep): Option[String] = {
+    val extension = if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"
+    val parts = Seq(pomDep.groupId, pomDep.artifactId, pomDep.version, extension)
+    if (parts.forall(part => part.nonEmpty && !part.contains("$")) && !isVersionRange(pomDep.version))
+      Some(s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.$extension")
+    else None
+  }
+
+  private def isVersionRange(version: String): Boolean =
+    version.startsWith("[") || version.startsWith("(")
+
   private def cachedFileForUrl(url: String): Option[File] =
     Try(new URI(url)).toOption.flatMap { uri =>
       Option(uri.getScheme).filter(s => s == "http" || s == "https").flatMap { scheme =>
-        Option(uri.getHost).map { host =>
-          new File(new File(new File(CacheDefaults.location, scheme), host), uri.getRawPath.stripPrefix("/"))
-        }
+        val path = uri.getRawPath.stripPrefix("/")
+        val candidates =
+          cacheAuthorityCandidates(uri).map { authority =>
+            new File(new File(new File(CacheDefaults.location, scheme), authority), path)
+          }
+        candidates.find(_.isFile).orElse(candidates.headOption)
       }
     }
 
+  private def cacheAuthorityCandidates(uri: URI): Seq[String] = {
+    val host = Option(uri.getHost)
+    val hostWithPort = host.map { value =>
+      if (uri.getPort >= 0) s"$value:${uri.getPort}" else value
+    }
+    val credentialedAuthorities =
+      hostWithPort.toSeq.flatMap { authority =>
+        host.toSeq.flatMap { value =>
+          Credentials.forHost(credentials.toSeq, value).toSeq.flatMap { c =>
+            Seq(s"${c.userName}@$authority", s"${c.userName}:${c.passwd}@$authority")
+          }
+        }
+      }
+    (Option(uri.getRawAuthority).toSeq ++ credentialedAuthorities ++ hostWithPort.toSeq ++ host.toSeq)
+      .map(coursierCacheAuthority)
+      .distinct
+  }
+
+  private def coursierCacheAuthority(authority: String): String =
+    URLEncoder.encode(authority, StandardCharsets.UTF_8.name).replace("+", "%20")
+
   /** Parse a POM and lock any parent POM and imported BOMs (scope=import, type=pom). */
   private def collectPomAncestors(artifact: CArtifact, repoDescriptors: Seq[RepoDescriptor]): Set[NixArtifact] = {
-    downloadArtifact(artifact).map { file =>
-      val pom = PomModel.parse(file)
-      val candidates = pom.parents ++ pom.importBoms ++ pom.optionalDeps
-      candidates.flatMap { pomDep =>
-        val path = s"${pomDep.groupId.replace('.', '/')}/${pomDep.artifactId}/${pomDep.version}/${pomDep.artifactId}-${pomDep.version}.${if (pomDep.`type`.nonEmpty) pomDep.`type` else "pom"}"
-        val descriptor = repoDescriptors.find(_.normalizedRoot == DefaultPublicRoot).getOrElse(repoDescriptors.head)
-        val url = descriptor.normalizedRoot + path
-        downloadArtifact(CArtifact(url)).toSeq.flatMap { f =>
-          val relative = computeRelativePath(url, descriptor)
-          val sha256 = computeSha256(f)
-          expandCrossSuffixed(NixArtifact(descriptor.name, relative, url, sha256))
-        }
-      }.toSet
-    }.getOrElse(Set.empty)
+    downloadArtifact(artifact)
+      .map(file => collectCachedPomAncestors(file, repoDescriptors))
+      .getOrElse(Set.empty)
   }
 
   private val ivyVariablePattern = "\\$\\{([^}]+)\\}".r
@@ -850,22 +1126,22 @@ class CoursierArtifactFetcher(
   private def computeSha256(file: File): String =
     NixArtifact.checksum(file)
 
-  private def authenticationFor(resolver: Resolver): Option[Authentication] = resolver match {
+  private def authenticationFor(resolver: Resolver): Option[SbtCoursierAuthentication] = resolver match {
     case m: MavenRepository =>
-      hostFromUrl(m.root).flatMap(credentialsForHost)
+      hostFromUrl(m.root).flatMap(credentialsForSbtCoursierHost)
     case p: PatternsBasedRepository if p.patterns.artifactPatterns.nonEmpty =>
       p.patterns.artifactPatterns.headOption
         .flatMap(hostFromUrl)
-        .flatMap(credentialsForHost)
+        .flatMap(credentialsForSbtCoursierHost)
     case _ => None
   }
 
   private def hostFromUrl(url: String): Option[String] =
     Try(new URI(url)).toOption.flatMap(uri => Option(uri.getHost))
 
-  private def credentialsForHost(host: String): Option[Authentication] =
+  private def credentialsForSbtCoursierHost(host: String): Option[SbtCoursierAuthentication] =
     Credentials.forHost(credentials.toSeq, host).map { c =>
-      Authentication(
+      SbtCoursierAuthentication(
         c.userName,
         c.passwd,
         optional = true,

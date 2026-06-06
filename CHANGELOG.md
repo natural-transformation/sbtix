@@ -15,7 +15,7 @@
 
 ### Fixed
 
-- Do not pin mutable Maven `maven-metadata.xml` files or sidecars in generated `repo.nix` locks when Coursier fetches them while resolving version ranges or repository metadata. This keeps generated Nix repositories reproducible after regenerating locks.
+- Do not pin mutable Maven `maven-metadata.xml` files or sidecars in generated `repo.nix` locks when Coursier fetches them while resolving version ranges or repository metadata. Instead, the generated Nix repository synthesizes local Maven metadata from the concrete locked versions so sandboxed/offline builds can still replay version-range resolution. The synthesized metadata intentionally includes only the locked `<versions>` list, not `<latest>` or `<release>` markers, to avoid implying upstream Maven version ordering.
 
 ## 1.0.0
 
