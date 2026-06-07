@@ -3,7 +3,7 @@ package se.nullable.sbtix
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues
-import sbt.ModuleID
+import sbt.{CrossVersion, ModuleID}
 import sbt.librarymanagement.{ConfigRef, ConfigurationReport, ModuleReport, UpdateReport, UpdateStats}
 import java.io.File
 import java.nio.file.Files
@@ -106,5 +106,25 @@ class SbtixPluginSpec extends AnyFlatSpec with Matchers with OptionValues {
       innerPlugins.getCanonicalFile,
       outerPlugins.getCanonicalFile
     )
+  }
+
+  "evictedDeclaredModules" should "select only declared roots that are evicted in the update report" in {
+    val evictedDeclared = ModuleID("dev.zio", "zio-json", "0.7.3").cross(CrossVersion.binary)
+    val activeDeclared = ModuleID("dev.zio", "zio", "2.1.23").cross(CrossVersion.binary)
+    val evictedReport = ModuleReport(ModuleID("dev.zio", "zio-json_3", "0.7.3"), Vector.empty, Vector.empty).withEvicted(true)
+    val activeReport = ModuleReport(ModuleID("dev.zio", "zio_3", "2.1.23"), Vector.empty, Vector.empty)
+    val report = UpdateReport(
+      new File("ivy.xml"),
+      Vector(ConfigurationReport(ConfigRef("compile"), Vector(evictedReport, activeReport), Vector.empty)),
+      UpdateStats(0L, 0L, 0L, cached = true),
+      Map.empty
+    )
+
+    SbtixPlugin.evictedDeclaredModules(
+      Set(evictedDeclared, activeDeclared),
+      report,
+      scalaVersion = "3.7.4",
+      scalaBinaryVersion = "3"
+    ) shouldBe Set(evictedDeclared)
   }
 }

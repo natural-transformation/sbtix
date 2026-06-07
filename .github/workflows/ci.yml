@@ -41,6 +41,9 @@ jobs:
       - name: Run scripted simple test
         run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/simple"'
 
+      - name: Run scripted evicted direct POM test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/evicted-direct-pom"'
+
       - name: Run scripted private auth test
         run: |
           nix develop . --command bash -lc '

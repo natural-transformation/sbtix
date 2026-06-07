@@ -1,0 +1,6 @@
+# Reproduces a vat-saas failure where an older direct dependency is evicted by
+# transitive resolution, but sbt still needs its POM metadata for offline Nix resolution.
+> sbtixGenerate
+$ exists repo.nix
+$ exec grep -q 'dev/zio/zio-json_3/0.7.44/zio-json_3-0.7.44.jar' repo.nix
+$ exec grep -q 'dev/zio/zio-json_3/0.7.3/zio-json_3-0.7.3.pom' repo.nix

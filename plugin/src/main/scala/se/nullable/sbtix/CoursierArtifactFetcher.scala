@@ -337,18 +337,18 @@ class CoursierArtifactFetcher(
     (nixRepos, artifacts)
   }
 
-  def lockModulePoms(modules: Set[ModuleID]): (Set[NixRepo], Set[NixArtifact]) = {
+  def lockModulePoms(modules: Set[ModuleID], fetchIfMissing: Boolean = false): (Set[NixRepo], Set[NixArtifact]) = {
     val repoDescriptors = buildRepoDescriptors(effectiveResolvers)
     val nixRepos = repoDescriptors.map(_.repo).toSet
     val artifacts =
       modules.flatMap(publicationVariants).flatMap { module =>
-        modulePomCandidates(module, repoDescriptors, fetchIfMissing = false).flatMap { case (url, file) =>
+        modulePomCandidates(module, repoDescriptors, fetchIfMissing = fetchIfMissing).flatMap { case (url, file) =>
           lockCachedArtifact(url, file, repoDescriptors) ++ collectCachedPomAncestors(file, repoDescriptors)
         }
       }
 
     SbtixDebug.info(logger) {
-      s"[SBTIX_DEBUG] Locked ${artifacts.size} cached module POM artifacts"
+      s"[SBTIX_DEBUG] Locked ${artifacts.size} module POM artifacts"
     }
     (nixRepos, artifacts)
   }
@@ -1052,8 +1052,7 @@ class CoursierArtifactFetcher(
       repoDescriptors: Seq[RepoDescriptor],
       fetchIfMissing: Boolean
   ): Set[(String, File)] = {
-    val modulePath =
-      s"${module.organization.replace('.', '/')}/${module.name}/${module.revision}/${module.name}-${module.revision}.pom"
+    val modulePath = modulePomPath(module)
     repoDescriptors.flatMap { descriptor =>
       val url = descriptor.normalizedRoot + modulePath
       cachedFileForUrl(url)
@@ -1061,6 +1060,11 @@ class CoursierArtifactFetcher(
         .orElse(if (fetchIfMissing && descriptor.normalizedRoot == DefaultPublicRoot) downloadArtifact(artifactForUrl(url)) else None)
         .map(file => (url, file))
     }.toSet
+  }
+
+  private[sbtix] def modulePomPath(module: ModuleID): String = {
+    val moduleName = resolveModuleName(module)
+    s"${module.organization.replace('.', '/')}/${moduleName}/${module.revision}/${moduleName}-${module.revision}.pom"
   }
 
   private def pomUrlFromArtifactUrl(module: ModuleID, artifactUrl: String): Option[String] = {
