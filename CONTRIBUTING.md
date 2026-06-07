@@ -14,7 +14,7 @@ When you touch the templates under `plugin/src/main/resources/sbtix/` (for examp
 
 ```bash
 # NOTE: Keep `plugin.version` in sync with `plugin/build.sbt` (`version := ...`).
-(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=1.1.0 "clean" "genNix" "genComposition")
+(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=1.1.1 "clean" "genNix" "genComposition")
 ```
 
 The scripted tests assert the stable generated-repository contract with targeted checks and a full `nix-build`. They do not exact-mirror every generated `repo.nix` entry, because Coursier can expose additional cached POM metadata that is useful but not part of sbtix's behavioral contract.

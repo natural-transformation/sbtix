@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+- Lock POM metadata for direct project dependencies that are evicted from the resolved classpath, so offline Nix builds still have the original root dependency metadata sbt resolves before eviction.
+- Use Scala cross-versioned module names when constructing direct module POM paths.
+- Add scripted regression coverage for evicted direct dependency POM locking and run it in CI.
+
 ## 1.1.0
 
 ### Changed
