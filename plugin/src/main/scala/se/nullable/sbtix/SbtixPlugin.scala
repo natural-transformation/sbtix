@@ -654,8 +654,8 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
     def lockUpdateReport(report: UpdateReport, artifactClassifiers: Seq[String]): FetchResult =
       FetchResult.fromLocked(fetcher(artifactClassifiers).fromUpdateReport(report))
 
-    def lockModulePoms(modules: Set[ModuleID]): FetchResult =
-      FetchResult.fromLocked(fetcher(Seq.empty[String]).lockModulePoms(modules))
+    def lockModulePoms(modules: Set[ModuleID], fetchIfMissing: Boolean = false): FetchResult =
+      FetchResult.fromLocked(fetcher(Seq.empty[String]).lockModulePoms(modules, fetchIfMissing))
   }
 
   private[sbtix] sealed trait PluginFetchPlan
@@ -903,7 +903,9 @@ ln -sf ivy.xml $$ivyDir/ivys/ivy-$version.xml"""
         FetchResult.combine(
           Seq(
             fetcherConfig.lockUpdateReport(projectUpdateReport, sbtixArtifactClassifiers.value),
-            fetcherConfig.lockModulePoms(declaredProjectModules),
+            // Declared roots may be evicted from the final classpath, but sbt still
+            // resolves their original POMs before applying eviction.
+            fetcherConfig.lockModulePoms(declaredProjectModules, fetchIfMissing = true),
             runFetches(
               dependencyFetchPlan(toolingDependencies, scalafmtRuntimeDeps, sbtixArtifactClassifiers.value),
               fetcherConfig
