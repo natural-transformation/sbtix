@@ -1052,9 +1052,7 @@ class CoursierArtifactFetcher(
       repoDescriptors: Seq[RepoDescriptor],
       fetchIfMissing: Boolean
   ): Set[(String, File)] = {
-    val moduleName = resolveModuleName(module)
-    val modulePath =
-      s"${module.organization.replace('.', '/')}/${moduleName}/${module.revision}/${moduleName}-${module.revision}.pom"
+    val modulePath = modulePomPath(module)
     repoDescriptors.flatMap { descriptor =>
       val url = descriptor.normalizedRoot + modulePath
       cachedFileForUrl(url)
@@ -1062,6 +1060,11 @@ class CoursierArtifactFetcher(
         .orElse(if (fetchIfMissing && descriptor.normalizedRoot == DefaultPublicRoot) downloadArtifact(artifactForUrl(url)) else None)
         .map(file => (url, file))
     }.toSet
+  }
+
+  private[sbtix] def modulePomPath(module: ModuleID): String = {
+    val moduleName = resolveModuleName(module)
+    s"${module.organization.replace('.', '/')}/${moduleName}/${module.revision}/${moduleName}-${module.revision}.pom"
   }
 
   private def pomUrlFromArtifactUrl(module: ModuleID, artifactUrl: String): Option[String] = {
