@@ -72,6 +72,9 @@ jobs:
       - name: Run scripted sbt 2 boot jars test
         run: nix develop . --command bash -lc 'cd plugin && sbt "++3.8.4" "scripted sbtix/sbt2-boot-jars"'
 
+      - name: Run scripted sbt 2 native-packager test
+        run: nix develop . --command bash -lc 'cd plugin && sbt "++3.8.4" "scripted sbtix/sbt2-native-packager"'
+
   nix:
     name: Nix build and integration (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}

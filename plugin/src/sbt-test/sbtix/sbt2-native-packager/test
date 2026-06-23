@@ -1,0 +1,12 @@
+# Real sbt 2 + sbt-native-packager integration coverage for buildSbtProgram.
+> genNix
+$ exists repo.nix
+$ exists project/repo.nix
+$ exec grep -q 'org/scala-lang/scala3-sbt-bridge/3.8.4/scala3-sbt-bridge-3.8.4.jar' repo.nix
+$ exec grep -q 'org/scala-sbt/sbt/2.0.0/sbt-2.0.0.jar' project/repo.nix
+$ exec grep -q 'com/github/sbt/sbt-native-packager_sbt2_3/1.11.7/sbt-native-packager_sbt2_3-1.11.7.jar' project/repo.nix
+> genComposition
+$ exists default.nix
+$ exists sbtix.nix
+$ exec grep -q 'sbtix_sbt2_3' sbtix-generated.nix
+$ exec sh -c 'rm -rf result nix-build.log; nix-build > nix-build.log 2>&1 || { cat nix-build.log; exit 1; }; grep -q "Running stage command: Universal / stage" nix-build.log; ./result/bin/sbt2-native-packager | grep -q "hello real sbt2 native packager"'
