@@ -28,7 +28,7 @@ $ exec nix-build
 $ exists result
 
 # Verify the generated Nix contains the correct symlink strategy for Coursier compatibility
-$ exec grep -q 'cat <<IVY_EOF > $ivyDir/ivys/ivy.xml' sbtix-generated.nix
+$ exec grep -Eq 'cat <<IVY_EOF > "?[$]ivyDir/ivys/ivy[.]xml"?' sbtix-generated.nix
 $ exec grep -q 'ln -sf ivy.xml' sbtix-generated.nix
 
 # Test the generated executable
