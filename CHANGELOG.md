@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.7
+
+### Fixed
+
+- Deduplicate content-equivalent Maven artifacts across resolver namespaces so stale duplicate mirror URLs do not break offline Nix builds when an equivalent locked public artifact is available.
+
 ## 1.2.6
 
 ### Fixed

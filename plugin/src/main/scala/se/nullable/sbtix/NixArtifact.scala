@@ -16,9 +16,11 @@ case class NixArtifact(
   url: String,
   sha256: String
 ) {
+  val repositoryPath: String =
+    if (relativePath.startsWith("/")) relativePath.drop(1) else relativePath
+
   val entryName: String = {
-    val cleanPath = if (relativePath.startsWith("/")) relativePath.drop(1) else relativePath
-    s"$repoName/$cleanPath"
+    s"$repoName/$repositoryPath"
   }
 
   /**

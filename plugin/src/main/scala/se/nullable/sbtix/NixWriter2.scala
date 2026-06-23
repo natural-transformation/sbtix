@@ -4,18 +4,77 @@ package se.nullable.sbtix
  * A simplified helper for writing Nix expressions
  */
 object NixWriter2 {
+  private case class ContentKey(repositoryPath: String, sha256: String)
+  private case class ArtifactChoice(
+      fileNamePriority: Int,
+      publicSourcePriority: Int,
+      url: String,
+      sha256: String,
+      entryName: String
+  )
+
+  private implicit val artifactChoiceOrdering: Ordering[ArtifactChoice] =
+    Ordering.by(choice =>
+      (
+        choice.fileNamePriority,
+        choice.publicSourcePriority,
+        choice.url,
+        choice.sha256,
+        choice.entryName
+      )
+    )
+
+  private val publicMavenRoots =
+    Set(
+      "https://repo1.maven.org/maven2/",
+      "https://repo.maven.apache.org/maven2/"
+    )
+
   private def fileName(path: String): String =
     path.takeWhile(ch => ch != '?' && ch != '#').split('/').lastOption.getOrElse("")
 
-  private def chooseArtifactForKey(artifacts: Seq[NixArtifact]): NixArtifact =
-    artifacts
-      .sortBy { artifact =>
-        val urlFileMatchesPath =
-          fileName(artifact.url) == fileName(artifact.relativePath)
-        // If no URL filename matches the offline path, keep the fallback deterministic.
-        (if (urlFileMatchesPath) 0 else 1, artifact.url, artifact.sha256)
-      }
-      .head
+  private def contentKey(artifact: NixArtifact): ContentKey =
+    ContentKey(artifact.repositoryPath, artifact.sha256.toUpperCase)
+
+  private def publicSourcePriority(artifact: NixArtifact): Int = {
+    val repoName = artifact.repoName.toLowerCase
+    val url = artifact.url.toLowerCase
+    if (repoName == "nix-public" || publicMavenRoots.exists(url.startsWith)) 0
+    else 1
+  }
+
+  private def artifactChoice(artifact: NixArtifact): ArtifactChoice = {
+    val urlFileMatchesPath =
+      fileName(artifact.url) == fileName(artifact.repositoryPath)
+
+    ArtifactChoice(
+      fileNamePriority = if (urlFileMatchesPath) 0 else 1,
+      publicSourcePriority = publicSourcePriority(artifact),
+      url = artifact.url,
+      sha256 = artifact.sha256.toUpperCase,
+      entryName = artifact.entryName
+    )
+  }
+
+  private def chooseCanonicalArtifact(artifacts: Seq[NixArtifact]): NixArtifact =
+    artifacts.sortBy(artifactChoice).head
+
+  private def deduplicateArtifacts(artifacts: Set[NixArtifact]): Seq[NixArtifact] = {
+    val generatedKeyArtifacts =
+      artifacts.toSeq
+        .filterNot(_.url.startsWith("file:"))
+        .groupBy(_.entryName)
+        .values
+        .map(chooseCanonicalArtifact)
+        .toSeq
+
+    generatedKeyArtifacts
+      .groupBy(contentKey)
+      .values
+      .map(chooseCanonicalArtifact)
+      .toSeq
+      .sortBy(a => (a.repoName, a.relativePath))
+  }
 
   /**
    * Creates a Nix expression for the repository
@@ -50,14 +109,7 @@ object NixWriter2 {
     
     // Artifacts section
     builder.append("  \"artifacts\" = {\n")
-    val sortedArtifacts =
-      artifacts.toSeq
-        .filterNot(_.url.startsWith("file:"))
-        .groupBy(_.entryName)
-        .values
-        .map(chooseArtifactForKey)
-        .toSeq
-        .sortBy(a => (a.repoName, a.relativePath))
+    val sortedArtifacts = deduplicateArtifacts(artifacts)
     if (sortedArtifacts.nonEmpty) {
       builder.append(sortedArtifacts.map(_.toNix).mkString("\n"))
       builder.append("\n")
