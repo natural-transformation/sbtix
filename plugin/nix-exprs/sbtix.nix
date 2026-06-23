@@ -75,7 +75,7 @@ let
               runHook preBuild
 
               ${sbtixShellHelpers}
-              sbtix_setup_sbt_environment
+              sbtix_setup_local_sbt_home
               sbtix_sbt update
 
               runHook postBuild
@@ -115,7 +115,7 @@ let
       sbt --server "$@"
     }
 
-    sbtix_setup_sbt_environment() {
+    sbtix_setup_local_sbt_home() {
       localHome="$(pwd)/.sbt-home"
       localCache="$localHome/.cache"
       mkdir -p "$localHome" "$localCache"
@@ -133,17 +133,20 @@ let
       fi
     }
 
+    sbtix_prepare_sbt() {
+      sbtix_setup_local_sbt_home
+      sbtix_seed_sbt_boot
+    }
+
     sbtix_copy_stage_roots() {
       local output="$1"
       local stageDir
       local found=1
 
       while IFS= read -r stageDir; do
-        if [ -n "$stageDir" ] && [ -d "$stageDir" ]; then
-          echo "[SBTIX_NIX_DEBUG] Copying staged application from $stageDir"
-          cp -r "$stageDir"/. "$output"/
-          found=0
-        fi
+        echo "[SBTIX_NIX_DEBUG] Copying staged application from $stageDir"
+        cp -r "$stageDir"/. "$output"/
+        found=0
       done < <(
         find . -type d \
           \( -path '*/target/universal/stage' -o -path '*/target/out/*/universal/stage' \) \
@@ -152,6 +155,35 @@ let
       )
 
       return "$found"
+    }
+
+    sbtix_stage_program() {
+      local output="$1"
+      shift
+      local stage_command
+      local stage_succeeded=0
+
+      for stage_command in "$@"; do
+        echo "[SBTIX_NIX_DEBUG] Running stage command: $stage_command"
+        if sbtix_sbt "$stage_command"; then
+          stage_succeeded=1
+          if sbtix_copy_stage_roots "$output"; then
+            return 0
+          fi
+        else
+          echo "[SBTIX_NIX_DEBUG] Stage command failed: $stage_command" 1>&2
+        fi
+      done
+
+      if [ "$stage_succeeded" -eq 0 ]; then
+        echo "error: buildSbtProgram could not run any configured stage command." 1>&2
+      else
+        echo "error: buildSbtProgram did not find staged application output." 1>&2
+      fi
+      echo "expected: a stage command creates target/universal/stage or target/out/.../universal/stage, usually via sbt-native-packager." 1>&2
+      echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
+      echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
+      return 1
     }
   '';
 
@@ -354,12 +386,10 @@ in rec {
               export COURSIER_CACHE=$(pwd)/.coursier-cache
               baseSbtOpts="''${SBT_OPTS:-}"
               export SBT_OPTS="$baseSbtOpts ${sbtOptions} -Dsbt.ivy.home=./.ivy2-home -Dsbt.boot.directory=./.sbt-boot -Dcoursier.cache=./.coursier-cache"
-              sbtix_setup_sbt_environment
+              sbtix_prepare_sbt
 
               # Setup local directory for plugin
               ${pluginBootstrap}
-
-              sbtix_seed_sbt_boot
 
               echo "[SBTIX_NIX_DEBUG] localBuildsRepo='${localBuildsRepo}'"
               if [ -n "${localBuildsRepo}" ]; then
@@ -425,8 +455,7 @@ in rec {
           runHook preInstall
 
           ${sbtixShellHelpers}
-          sbtix_setup_sbt_environment
-          sbtix_seed_sbt_boot
+          sbtix_prepare_sbt
           sbtix_sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
           localIvyDir="./.ivy2-home/local"
@@ -457,41 +486,14 @@ in rec {
           runHook preInstall
 
           ${sbtixShellHelpers}
-          sbtix_setup_sbt_environment
-          sbtix_seed_sbt_boot
+          sbtix_prepare_sbt
           mkdir -p $out/
-          stage_succeeded=0
-          copied_any=0
 
           stage_commands=(
 ${stageCommandsArray}
           )
 
-          for stage_command in "''${stage_commands[@]}"; do
-            if [ "$copied_any" -ne 0 ]; then
-              break
-            fi
-
-            echo "[SBTIX_NIX_DEBUG] Running stage command: $stage_command"
-            if sbtix_sbt "$stage_command"; then
-              stage_succeeded=1
-              if sbtix_copy_stage_roots "$out"; then
-                copied_any=1
-              fi
-            else
-              echo "[SBTIX_NIX_DEBUG] Stage command failed: $stage_command" 1>&2
-            fi
-          done
-
-          if [ "$copied_any" -eq 0 ]; then
-            if [ "$stage_succeeded" -eq 0 ]; then
-              echo "error: buildSbtProgram could not run any configured stage command." 1>&2
-            else
-              echo "error: buildSbtProgram did not find staged application output." 1>&2
-            fi
-            echo "expected: a stage command creates target/universal/stage or target/out/.../universal/stage, usually via sbt-native-packager." 1>&2
-            echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
-            echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
+          if ! sbtix_stage_program "$out" "''${stage_commands[@]}"; then
             exit 1
           fi
           if [ -d "$out/bin" ]; then
