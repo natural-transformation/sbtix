@@ -3,7 +3,10 @@
 let
   fakeSbt = pkgs.writeShellScriptBin "sbt" ''
     echo "fake sbt: $*" 1>&2
-    if [ "''${1:-}" = "stage" ]; then
+    if [ "''${1:-}" = "--server" ]; then
+      shift
+    fi
+    if [ "$*" = "Universal / stage" ] || [ "$*" = "stage" ]; then
       exit 1
     fi
     exit 0

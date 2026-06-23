@@ -155,9 +155,9 @@ in
   }
 ```
 
-For a project with an sbt-native-packager `stage` task, use
-`buildSbtProgram`. For a library, use `buildSbtLibrary`. For custom layouts
-such as assembly jars, use `buildSbtProject` with an explicit `installPhase`.
+For a project with an sbt-native-packager stage task, use `buildSbtProgram`.
+For a library, use `buildSbtLibrary`. For custom layouts such as assembly jars,
+use `buildSbtProject` with an explicit `installPhase`.
 
 See [`examples/flake-app/flake.nix`](examples/flake-app/flake.nix) for a complete
 `devShells` + `packages.default` setup.
@@ -284,8 +284,11 @@ There is also `sbtix.buildSbtProject`, which allows you to define a custom Nix `
 
 #### Programs
 
-Programs must have a `stage` task, and it is assumed that calling this task will put its output in `target/universal/stage`. This folder is then copied
-to be the Nix build output.
+Programs must stage an application with `Universal / stage` or `stage`. By
+default `buildSbtProgram` tries both commands and copies staged output from
+`target/universal/stage` or sbt 2-style `target/out/.../universal/stage` into
+the Nix build output. Override `stageCommands` when a project uses a custom
+packaging task.
 
 This is generally fulfilled by SBT-Native-Packager's [sbt-np-jaa](Java Application Archetype).
 
@@ -391,7 +394,7 @@ A: Keep your own `default.nix` in the project. `genComposition` writes `sbtix-ge
 
 Q: How do I use a different type of SBT build in `default.nix`
 
-A: The generated composition uses `sbtix.buildSbtProgram`, which expects a `stage` task. For libraries, call `sbtix.buildSbtLibrary` directly from your own `default.nix`; for custom layouts, call `sbtix.buildSbtProject` with an explicit `installPhase`.
+A: The generated composition uses `sbtix.buildSbtProgram`, which expects a native-packager-style staged application. For libraries, call `sbtix.buildSbtLibrary` directly from your own `default.nix`; for custom layouts, call `sbtix.buildSbtProject` with an explicit `installPhase`.
 
 ## Thanks
 

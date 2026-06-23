@@ -74,7 +74,9 @@ let
             buildPhase = ''
               runHook preBuild
 
-              sbt update
+              ${sbtixShellHelpers}
+              sbtix_setup_sbt_environment
+              sbtix_sbt update
 
               runHook postBuild
             '';
@@ -107,6 +109,51 @@ let
     runCommand name { inherit input; } ''
       cp -a $input $out
     '';
+
+  sbtixShellHelpers = ''
+    sbtix_sbt() {
+      sbt --server "$@"
+    }
+
+    sbtix_setup_sbt_environment() {
+      localHome="$(pwd)/.sbt-home"
+      localCache="$localHome/.cache"
+      mkdir -p "$localHome" "$localCache"
+      export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
+      export HOME="$localHome"
+      export XDG_CACHE_HOME="$localCache"
+    }
+
+    sbtix_seed_sbt_boot() {
+      if [ -d ${sbt}/share/sbt/boot ]; then
+        echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
+        mkdir -p ./.sbt-boot
+        cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
+        chmod -R u+w ./.sbt-boot || true
+      fi
+    }
+
+    sbtix_copy_stage_roots() {
+      local output="$1"
+      local stageDir
+      local found=1
+
+      while IFS= read -r stageDir; do
+        if [ -n "$stageDir" ] && [ -d "$stageDir" ]; then
+          echo "[SBTIX_NIX_DEBUG] Copying staged application from $stageDir"
+          cp -r "$stageDir"/. "$output"/
+          found=0
+        fi
+      done < <(
+        find . -type d \
+          \( -path '*/target/universal/stage' -o -path '*/target/out/*/universal/stage' \) \
+          ! -path '*/streams/*' \
+          | sort -u
+      )
+
+      return "$found"
+    }
+  '';
 
 in rec {
     mkRepo = name: artifacts: localBuildsRepo: runCommand name {}
@@ -303,25 +350,16 @@ in rec {
             buildPhase = ''
               runHook preBuild
 
+              ${sbtixShellHelpers}
               export COURSIER_CACHE=$(pwd)/.coursier-cache
               baseSbtOpts="''${SBT_OPTS:-}"
               export SBT_OPTS="$baseSbtOpts ${sbtOptions} -Dsbt.ivy.home=./.ivy2-home -Dsbt.boot.directory=./.sbt-boot -Dcoursier.cache=./.coursier-cache"
-              localHome="$(pwd)/.sbt-home"
-              localCache="$localHome/.cache"
-              mkdir -p "$localHome" "$localCache"
-              export SBT_OPTS="$SBT_OPTS -Duser.home=$localHome"
-              export HOME="$localHome"
-              export XDG_CACHE_HOME="$localCache"
+              sbtix_setup_sbt_environment
 
               # Setup local directory for plugin
               ${pluginBootstrap}
 
-              if [ -d ${sbt}/share/sbt/boot ]; then
-                echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
-                mkdir -p ./.sbt-boot
-                cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
-                chmod -R u+w ./.sbt-boot || true
-              fi
+              sbtix_seed_sbt_boot
 
               echo "[SBTIX_NIX_DEBUG] localBuildsRepo='${localBuildsRepo}'"
               if [ -n "${localBuildsRepo}" ]; then
@@ -337,7 +375,7 @@ in rec {
               echo "[SBTIX_NIX_DEBUG] sbtixRepos configuration:"
               cat ${sbtixRepos}
 
-              sbt compile
+              sbtix_sbt compile
               runHook postBuild
             '';
 
@@ -386,17 +424,10 @@ in rec {
         installPhase = ''
           runHook preInstall
 
-          localHome="$(pwd)/.sbt-home"
-          localCache="$localHome/.cache"
-          mkdir -p "$localHome" "$localCache"
-          if [ -d ${sbt}/share/sbt/boot ]; then
-            echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
-            mkdir -p ./.sbt-boot
-            cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
-            chmod -R u+w ./.sbt-boot || true
-          fi
-          export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
-          HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt ++${scalaVersion} publishLocal
+          ${sbtixShellHelpers}
+          sbtix_setup_sbt_environment
+          sbtix_seed_sbt_boot
+          sbtix_sbt ++${scalaVersion} publishLocal
           mkdir -p $out/
           localIvyDir="./.ivy2-home/local"
           if [ -d "$localIvyDir" ]; then
@@ -409,57 +440,67 @@ in rec {
         '';
     } // args);
 
-    buildSbtProgram = args: buildSbtProject ({
+    buildSbtProgram = args:
+      let
+        stageCommandsArg =
+          if args ? stageCommands then args.stageCommands
+          else if args ? stageCommand then args.stageCommand
+          else [ "Universal / stage" "stage" ];
+        stageCommands =
+          if builtins.typeOf stageCommandsArg == "list"
+          then stageCommandsArg
+          else [ stageCommandsArg ];
+        stageCommandsArray = concatStringsSep "\n" (map (cmd: "            ${lib.escapeShellArg cmd}") stageCommands);
+        programArgs = builtins.removeAttrs args [ "stageCommand" "stageCommands" ];
+      in buildSbtProject ({
         installPhase = ''
           runHook preInstall
 
-          localHome="$(pwd)/.sbt-home"
-          localCache="$localHome/.cache"
-          mkdir -p "$localHome" "$localCache"
-          if [ -d ${sbt}/share/sbt/boot ]; then
-            echo "[SBTIX_NIX_DEBUG] Seeding sbt boot from ${sbt}/share/sbt/boot"
-            mkdir -p ./.sbt-boot
-            cp -RL ${sbt}/share/sbt/boot/. ./.sbt-boot/
-            chmod -R u+w ./.sbt-boot || true
-          fi
-          export SBT_OPTS="''${SBT_OPTS:-} -Duser.home=$localHome"
-          if ! HOME="$localHome" XDG_CACHE_HOME="$localCache" sbt stage; then
-            echo "error: buildSbtProgram could not run sbt stage." 1>&2
-            echo "expected: sbt stage creates target/universal/stage, usually via sbt-native-packager." 1>&2
-            echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
-            echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
-            exit 1
-          fi
+          ${sbtixShellHelpers}
+          sbtix_setup_sbt_environment
+          sbtix_seed_sbt_boot
           mkdir -p $out/
+          stage_succeeded=0
           copied_any=0
-          copy_stage_root() {
-            local dir="$1"
-            if [ -d "$dir" ]; then
-              echo "[SBTIX_NIX_DEBUG] Copying staged application from $dir"
-              cp -r "$dir"/. $out/
-              copied_any=1
-            fi
-          }
 
-          copy_stage_root "target/universal/stage"
-          while IFS= read -r stageDir; do
-            if [ -n "$stageDir" ] && [ "$stageDir" != "target/universal/stage" ]; then
-              copy_stage_root "$stageDir"
-            fi
-          done < <(find . -path '*/target/universal/stage' -type d)
+          stage_commands=(
+${stageCommandsArray}
+          )
 
-          if [ $copied_any -eq 0 ]; then
-            echo "error: buildSbtProgram did not find staged application output." 1>&2
-            echo "expected: sbt stage creates target/universal/stage, usually via sbt-native-packager." 1>&2
+          for stage_command in "''${stage_commands[@]}"; do
+            if [ "$copied_any" -ne 0 ]; then
+              break
+            fi
+
+            echo "[SBTIX_NIX_DEBUG] Running stage command: $stage_command"
+            if sbtix_sbt "$stage_command"; then
+              stage_succeeded=1
+              if sbtix_copy_stage_roots "$out"; then
+                copied_any=1
+              fi
+            else
+              echo "[SBTIX_NIX_DEBUG] Stage command failed: $stage_command" 1>&2
+            fi
+          done
+
+          if [ "$copied_any" -eq 0 ]; then
+            if [ "$stage_succeeded" -eq 0 ]; then
+              echo "error: buildSbtProgram could not run any configured stage command." 1>&2
+            else
+              echo "error: buildSbtProgram did not find staged application output." 1>&2
+            fi
+            echo "expected: a stage command creates target/universal/stage or target/out/.../universal/stage, usually via sbt-native-packager." 1>&2
             echo "if this project is a library, use sbtix.buildSbtLibrary instead." 1>&2
             echo "for custom layouts, use sbtix.buildSbtProject with an installPhase." 1>&2
             exit 1
           fi
-          for p in $(find $out/bin/* -executable); do
-            wrapProgram "$p" --prefix PATH : ${jre}/bin --prefix PATH : ${gawk}/bin
-          done
+          if [ -d "$out/bin" ]; then
+            while IFS= read -r p; do
+              wrapProgram "$p" --prefix PATH : ${jre}/bin --prefix PATH : ${gawk}/bin
+            done < <(find "$out/bin" -type f -executable)
+          fi
 
           runHook postInstall
         '';
-    } // args);
+    } // programArgs);
 }

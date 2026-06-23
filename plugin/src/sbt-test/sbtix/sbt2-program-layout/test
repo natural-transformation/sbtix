@@ -1,0 +1,7 @@
+# Reproduce sbt 2 program-builder behavior without depending on a large real app:
+# the fake runner rejects bare `sbt`, accepts only launcher-level `--server`,
+# and stages output under the sbt 2 `target/out/.../universal/stage` layout.
+> genComposition
+$ exists default.nix
+$ exists sbtix.nix
+$ exec sh -c 'rm -rf result nix-build.log; nix-build > nix-build.log 2>&1 || { cat nix-build.log; exit 1; }; grep -q "fake sbt: --server compile" nix-build.log; grep -q "fake sbt: --server Universal / stage" nix-build.log; ./result/bin/sbt2-program-layout | grep -q staged-from-target-out'
