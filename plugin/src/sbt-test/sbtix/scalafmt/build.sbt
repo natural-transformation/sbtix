@@ -13,7 +13,7 @@ lazy val root = (project in file("."))
       ("uk.co.real-logic" % "sbe-tool" % "1.38.1").pomOnly(),
       "org.apache.pulsar" % "bouncy-castle-bc" % "4.2.1"
     ),
-    stage := {
+    stage := Def.uncached {
       (Compile / compile).value
       val stageDir = target.value / "universal" / "stage"
       val binDir = stageDir / "bin"

@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.0.0
+
+sbtix 2 supports sbt 2.x builds only. [MIGRATION.md](MIGRATION.md) lists the steps for projects that come from sbtix 1.x.
+
+### Breaking
+
+- Drop sbt 1.x support. The plugin is built and published for sbt 2 only (`sbtix_sbt2_3`). The `sbtix` CLI stops with a message when `project/build.properties` names an sbt version that is not 2.x. sbt 1.x builds stay on sbtix 1.2.8.
+- Remove the bundled sbt bootstrap lock `sbtix-plugin-repo.nix`. sbtix no longer writes it into projects, and `sbtix.nix` and `sbtix-generated.nix` no longer read it. The sbt launcher artifacts are locked per project instead.
+- Remove the `extraPluginRepos` argument of `plugin/nix-exprs/sbtix.nix`.
+- Remove `plugin/repo-sbt2.nix` and `plugin/nix-exprs/plugin-bootstrap-snippet.nix` from the repository. The plugin build is locked by `plugin/repo.nix` and `plugin/project/repo.nix`.
+
+### Fixed
+
+- Run sbt in a foreground process of its own from the `sbtix` CLI, without an sbt server. Before, `sbtix genNix` and `sbtix genComposition` failed with `Not a valid key: genNix` when an sbt server was already running for the build, because the sbt 2 thin client sent the commands to that server. When no server was running, sbtix started one and left it behind.
+- Always load the plugin of the sbtix that runs. sbt 2 reuses the plugin classpath it cached in the build's `target` directory, so a build could keep loading the plugin jar of another sbtix build with the same version, or pick up a copy from `~/.ivy2/local`. sbt now finds the plugin through the fixed path `~/.sbtix/plugin-repo`, and looks there first.
+- Evaluate `plugin/nix-exprs/sbtix.nix` with nixpkgs revisions that removed `lib.fold`.
+- Leave `target` directories out of the sources in `sbtix-generated.nix`. sbt 2 fills them with symlinks into its cache, which broke builds from a working tree in the Nix sandbox.
+
+### Changed
+
+- Build and test with sbt 2.0.12, and update the flake's nixpkgs so the CLI uses the sbt 2.0.12 runner.
+- Update coursier to 2.1.26.
+- Build the plugin itself with sbt 2. It stays on Scala 3.8.4, the Scala version sbt 2.0.x runs on; sbt cannot load a plugin compiled with a newer Scala 3 minor.
+- Cover Scala 3.9.0 projects in the test suites and the flake example.
+- Stop touching `~/.ivy2` from the CLI. It no longer links the plugin into `~/.ivy2/local` or deletes `~/.ivy2/cache/se.nullable.sbtix`.
+- Stop using a global sbt plugin definition. The CLI removes the one that sbtix 1.x left in `~/.sbtix/plugins`.
+
+### Added
+
+- `withoutSbtOutput` in `plugin/nix-exprs/sbtix.nix`: a source filter that leaves `target` directories out, for Nix expressions that use a working directory as `src`.
+- `MIGRATION.md`.
+
 ## 1.2.8
 
 ### Fixed

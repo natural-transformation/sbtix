@@ -1,41 +1,31 @@
-val scala212 = "2.12.20"
-val scala3   = "3.8.4"
-val sbt1     = "1.12.11"
-val sbt2     = "2.0.0"
-val coursier = "2.1.24"
+val coursier = "2.1.26"
 
+// The path `publishLocal` writes the plugin jar to. sbt 2 plugins are published
+// with an `_sbt2_3` style suffix (sbt major version and Scala binary version).
 def localPluginJarPath(org: String, module: String, version: String, scalaBin: String, sbtBin: String) = {
-  val ivyLocalOrg = Path.userHome / ".ivy2" / "local" / org
-  if (sbtBin == "1.0") {
-    ivyLocalOrg / module / s"scala_$scalaBin" / s"sbt_$sbtBin" / version / "jars" / s"$module.jar"
-  } else {
-    val sbtMajor = sbtBin.takeWhile(_ != '.')
-    val artifact = s"${module}_sbt${sbtMajor}_$scalaBin"
-    ivyLocalOrg / artifact / version / "jars" / s"$artifact.jar"
-  }
+  val sbtMajor = sbtBin.takeWhile(_ != '.')
+  val artifact = s"${module}_sbt${sbtMajor}_$scalaBin"
+  Path.userHome / ".ivy2" / "local" / org / artifact / version / "jars" / s"$artifact.jar"
 }
 
+// coursier is used through its Scala 2.13 artifacts. Generated Metals/Bloop
+// plugin files bring Scala 2.13 builds of the same libraries (jsoniter-scala),
+// and mixing those with `_3` builds makes sbt reject the plugin classpath.
 def coursierDependency(module: String): ModuleID =
   ("io.get-coursier" %% module % coursier)
     .cross(CrossVersion.for3Use2_13)
     .exclude("org.scala-lang.modules", "scala-collection-compat_2.13")
     .exclude("org.scala-lang.modules", "scala-xml_2.13")
 
-ThisBuild / scalaVersion := scala212
-ThisBuild / crossScalaVersions := Seq(scala212, scala3)
-
+// No `scalaVersion` here on purpose. An sbt plugin is compiled with the Scala
+// version that sbt itself runs on (3.8.4 for sbt 2.0.x). sbt compiles build
+// files with that compiler, and it cannot read the TASTy of a newer Scala 3
+// minor, so a plugin built with a newer Scala would not load.
 sbtPlugin := true
-
-pluginCrossBuild / sbtVersion := {
-  scalaBinaryVersion.value match {
-    case "2.12" => sbt1
-    case _      => sbt2
-  }
-}
 
 name         := "sbtix"
 organization := "se.nullable.sbtix"
-version      := "1.2.8"
+version      := "2.0.0"
 
 publishTo := {
   if (isSnapshot.value) Some(Resolver.sonatypeCentralSnapshots)
@@ -43,12 +33,12 @@ publishTo := {
 }
 
 
-licenses := Seq("MIT" -> url("https://opensource.org/licenses/MIT"))
-homepage := Some(url("https://github.com/natural-transformation/sbtix"))
+licenses := Seq(License.MIT)
+homepage := Some(uri("https://github.com/natural-transformation/sbtix"))
 
 scmInfo := Some(
   ScmInfo(
-    url("https://github.com/natural-transformation/sbtix"),
+    uri("https://github.com/natural-transformation/sbtix"),
     "scm:git:https://github.com/natural-transformation/sbtix.git"
   )
 )
@@ -72,17 +62,9 @@ scriptedLaunchOpts ++= Seq(
   // - `sbtix.sourcePath` lets Nix build the sbtix plugin from this checkout (nix-build flow)
   // - `sbtix.pluginJarPath` pins the loaded plugin jar so we can detect stale classpaths
   s"-Dsbtix.sourcePath=${baseDirectory.value.getParentFile.getAbsolutePath}",
-  s"-Dsbtix.pluginJarPath=${localPluginJarPath(organization.value, name.value, version.value, scalaBinaryVersion.value, (pluginCrossBuild / sbtBinaryVersion).value).getAbsolutePath}"
+  s"-Dsbtix.pluginJarPath=${localPluginJarPath(organization.value, name.value, version.value, scalaBinaryVersion.value, sbtBinaryVersion.value).getAbsolutePath}"
 )
 scriptedBufferLog := false
-
-Compile / unmanagedSources / excludeFilter := {
-  val current = (Compile / unmanagedSources / excludeFilter).value
-  if (scalaBinaryVersion.value == "3") current || "NixPlugin.scala" else current
-}
-
-// Explicitly set the sbt version for scripted tests
-scriptedSbt := (pluginCrossBuild / sbtVersion).value
 
 // Scripted tests must not create or require JARs inside the test projects.
 // We bootstrap the plugin from Nix (see `sbtix.sourcePath` above) and keep the
@@ -111,8 +93,7 @@ Compile / resourceGenerators += Def.task {
   IO.createDirectory(managed)
   val files = Seq(
     "sbtix.nix" -> (base / "nix-exprs" / "sbtix.nix"),
-    "manual-repo.nix" -> (base / "nix-exprs" / "manual-repo.nix"),
-    "sbtix-plugin-repo.nix" -> (base / "sbtix-plugin-repo.nix")
+    "manual-repo.nix" -> (base / "nix-exprs" / "manual-repo.nix")
   )
   files.map { case (name, src) =>
     val dest = managed / name
@@ -125,7 +106,6 @@ scalafmtOnCompile := false
 
 libraryDependencies ++= Seq(
   coursierDependency("coursier"),
-  coursierDependency("coursier-sbt-maven-repository"),
   ("com.lihaoyi" %% "upickle" % "4.4.3").cross(CrossVersion.for3Use2_13),
   "org.scalatest" %% "scalatest" % "3.2.20" % Test
 )

@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.3.7"
+ThisBuild / scalaVersion := "3.9.0"
 ThisBuild / version := "0.1.0"
 
 lazy val stage = taskKey[File]("Stage a minimal executable for sbtix buildSbtProgram")
@@ -6,7 +6,7 @@ lazy val stage = taskKey[File]("Stage a minimal executable for sbtix buildSbtPro
 lazy val root = (project in file("."))
   .settings(
     name := "scala3-test",
-    stage := {
+    stage := Def.uncached {
       (Compile / compile).value
       val stageDir = target.value / "universal" / "stage"
       val binDir = stageDir / "bin"

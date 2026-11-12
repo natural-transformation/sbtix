@@ -2,7 +2,7 @@
 , jdk, jre, sbt, selfSourceInfo ? {}
 }:
 let
-  version = "1.2.8";
+  version = "2.0.0";
   versionSnapshotSuffix = "";
   pluginVersion = "${version}${versionSnapshotSuffix}";
 
@@ -13,29 +13,14 @@ let
   sourceNarHash = selfSourceInfo.narHash or (builtins.getEnv "SBTIX_SOURCE_NAR_HASH");
   sourcePath = selfSourceInfo.outPath or (builtins.getEnv "SBTIX_SOURCE_PATH");
 
-  pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
-    version = pluginVersion;
-  };
+  # sbt 2 publishes plugins as `<name>_sbt<sbt major>_<scala binary>`.
+  sbtixPluginArtifact = "sbtix_sbt2_3";
 
-  sbtixPluginRepoOrgPath =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix";
+  sbtixPluginJarPath =
+    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/${sbtixPluginArtifact}/${pluginVersion}/jars/${sbtixPluginArtifact}.jar";
 
-  sbtixPluginJarPathSbt1 =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
-
-  sbtixPluginJarPathSbt2 =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix_sbt2_3/${pluginVersion}/jars/sbtix_sbt2_3.jar";
-
-  sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
-    [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
-    [ pluginVersion pluginBootstrapSnippet ]
-    (builtins.readFile ./plugin/nix-exprs/sbtix.nix));
-
-  sbtix = callPackage sbtixNix {
+  sbtix = callPackage ./plugin/nix-exprs/sbtix.nix {
     inherit jdk jre sbt;
-    extraPluginRepos = [
-      (import ./plugin/sbtix-plugin-repo.nix)
-    ];
   };
 
   sbtixPluginRepo = sbtix.buildSbtProject {
@@ -43,20 +28,32 @@ let
 
         src = ./plugin;
         repo = [ (import ./plugin/repo.nix)
-                 (import ./plugin/repo-sbt2.nix)
                  (import ./plugin/project/repo.nix)
                  (import ./plugin/nix-exprs/manual-repo.nix)
                ];
 
+        # `--server` makes the sbt runner start sbt in the foreground. A bare
+        # `sbt` would go through the thin client and a background server.
         installPhase =''
-          sbt +publishLocal
+          sbt --server publishLocal
           mkdir -p $out/plugin-repo
           cp -r ./.ivy2-home/local/. $out/plugin-repo/
         '';
   };
 
+  # The plugin definition that the `sbtix` wrapper adds to a build while it
+  # runs. The wrapper passes the plugin repository as `sbtix.pluginRepo`.
   pluginsSbtix = writeText "plugins.sbt" ''
-    resolvers += Resolver.file("Sbtix Plugin Repo", file("${sbtixPluginRepo}/plugin-repo"))(Resolver.ivyStylePatterns)
+    val sbtixPluginRepo = sys.props.getOrElse(
+      "sbtix.pluginRepo",
+      sys.error("This file was left behind by sbtix. It is safe to delete it.")
+    )
+
+    // Look in the sbtix plugin repository first. sbt asks ~/.ivy2/local before
+    // any other resolver, so without this it would load an sbtix plugin that
+    // someone published locally (`sbt publishLocal` in an sbtix checkout)
+    // instead of the one that belongs to the running sbtix.
+    externalResolvers := Resolver.file("Sbtix Plugin Repo", file(sbtixPluginRepo))(using Resolver.ivyStylePatterns) +: externalResolvers.value
 
     addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
   '';
@@ -95,9 +92,8 @@ let
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
       --replace @generatedIdePluginCompat@ ${generatedIdePluginCompatSbt} \
-      --replace @pluginRepoOrg@ ${sbtixPluginRepoOrgPath} \
-      --replace @pluginJarSbt1@ ${sbtixPluginJarPathSbt1} \
-      --replace @pluginJarSbt2@ ${sbtixPluginJarPathSbt2} \
+      --replace @pluginRepo@ ${sbtixPluginRepo}/plugin-repo \
+      --replace @pluginJar@ ${sbtixPluginJarPath} \
       --replace @sbt@ ${sbt}/bin/sbt \
       --replace @sourceRev@ "${sourceRev}" \
       --replace @sourceNarHash@ "${sourceNarHash}" \

@@ -2,8 +2,8 @@
 > genNix
 $ exists repo.nix
 $ exists project/repo.nix
-$ exec grep -q 'org/scala-lang/scala3-sbt-bridge/3.8.4/scala3-sbt-bridge-3.8.4.jar' repo.nix
-$ exec grep -q 'org/scala-sbt/sbt/2.0.0/sbt-2.0.0.jar' project/repo.nix
+$ exec grep -q 'org/scala-lang/scala3-sbt-bridge/3.9.0/scala3-sbt-bridge-3.9.0.jar' repo.nix
+$ exec grep -q 'org/scala-sbt/sbt/2.0.12/sbt-2.0.12.jar' project/repo.nix
 $ exec grep -q 'com/github/sbt/sbt-native-packager_sbt2_3/1.11.7/sbt-native-packager_sbt2_3-1.11.7.jar' project/repo.nix
 > genComposition
 $ exists default.nix

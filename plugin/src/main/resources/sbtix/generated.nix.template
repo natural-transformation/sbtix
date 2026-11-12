@@ -31,17 +31,10 @@ let
         else []
     ) (builtins.attrNames rootEntries));
 
-  pluginRepoPath = ./sbtix-plugin-repo.nix;
-  pluginRepo =
-    if builtins.pathExists pluginRepoPath
-    then import pluginRepoPath
-    else null;
-
   repositories =
     [ repoLock projectRepo projectMetaRepo ]
     ++ subprojectRepos
-    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo
-    ++ optional (pluginRepo != null) pluginRepo;
+    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo;
   
   buildInputsPath = ./sbtix-build-inputs.nix;
   sbtixInputs =
@@ -51,7 +44,7 @@ let
 in
   sbtix.buildSbtProgram {
     name = "{{PROJECT_NAME}}";
-    src = cleanSource ./.;
+    src = sbtix.withoutSbtOutput (cleanSource ./.);
     repo = repositories;
     sbtOptions = "-Dplugin.version={{PLUGIN_VERSION}}";
     sbtixBuildInputs = sbtixInputs;

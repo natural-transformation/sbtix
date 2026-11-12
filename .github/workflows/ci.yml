@@ -33,19 +33,19 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run unit tests
-        run: nix develop . --command bash -lc 'cd plugin && sbt test'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server testFull'
 
       - name: Run scripted diagnostics test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/library-diagnostic"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/library-diagnostic"'
 
       - name: Run scripted simple test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/simple"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/simple"'
 
       - name: Run scripted evicted direct POM test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/evicted-direct-pom"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/evicted-direct-pom"'
 
       - name: Run scripted relocated POM test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/relocated-pom"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/relocated-pom"'
 
       - name: Run scripted private auth test
         run: |
@@ -60,20 +60,20 @@ jobs:
             fi
             trap "kill $server 2>/dev/null || true" EXIT INT TERM
             cd plugin
-            sbt "scripted sbtix/private-auth"
+            sbt --server "scripted sbtix/private-auth"
           '
 
       - name: Run scripted scalafmt test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/scalafmt"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/scalafmt"'
 
       - name: Run scripted Scala 3 test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "scripted sbtix/scala3"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/scala3"'
 
       - name: Run scripted sbt 2 boot jars test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "++3.8.4" "scripted sbtix/sbt2-boot-jars"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/sbt2-boot-jars"'
 
       - name: Run scripted sbt 2 native-packager test
-        run: nix develop . --command bash -lc 'cd plugin && sbt "++3.8.4" "scripted sbtix/sbt2-native-packager"'
+        run: nix develop . --command bash -lc 'cd plugin && sbt --server "scripted sbtix/sbt2-native-packager"'
 
   nix:
     name: Nix build and integration (${{ matrix.runner }})
