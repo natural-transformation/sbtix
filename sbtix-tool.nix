@@ -41,48 +41,69 @@ let
         '';
   };
 
-  # The plugin definition that the `sbtix` wrapper adds to a build while it
-  # runs. The wrapper passes the plugin repository as `sbtix.pluginRepo`.
+  # The two files below are added to a build while the `sbtix` wrapper runs.
+  #
+  # Other sbt processes can load the build in that time: an sbt server that
+  # reloads, an IDE, a second terminal. The files must not change anything for
+  # them. So every setting in them depends on the `sbtix.pluginRepo` property,
+  # which only the sbt process started by the wrapper has. Without it, a file
+  # contributes no settings at all.
+
+  # The plugin definition. The wrapper passes the plugin repository as
+  # `sbtix.pluginRepo`.
   pluginsSbtix = writeText "plugins.sbt" ''
-    val sbtixPluginRepo = sys.props.getOrElse(
-      "sbtix.pluginRepo",
-      sys.error("This file was left behind by sbtix. It is safe to delete it.")
-    )
-
-    // Look in the sbtix plugin repository first. sbt asks ~/.ivy2/local before
-    // any other resolver, so without this it would load an sbtix plugin that
-    // someone published locally (`sbt publishLocal` in an sbtix checkout)
-    // instead of the one that belongs to the running sbtix.
-    externalResolvers := Resolver.file("Sbtix Plugin Repo", file(sbtixPluginRepo))(using Resolver.ivyStylePatterns) +: externalResolvers.value
-
-    addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
+    // sbtix adds this file while it runs, and removes it when it exits.
+    //
+    // It only has an effect in the sbt process that sbtix starts: that process
+    // has the `sbtix.pluginRepo` property. Any other sbt process that loads
+    // this build gets no settings from this file. If sbtix was killed and left
+    // the file behind, it is safe to delete it.
+    sys.props.get("sbtix.pluginRepo").toSeq.flatMap { sbtixPluginRepo =>
+      Seq[Setting[?]](
+        // Look in the sbtix plugin repository first. sbt asks ~/.ivy2/local before
+        // any other resolver, so without this it would load an sbtix plugin that
+        // someone published locally (`sbt publishLocal` in an sbtix checkout)
+        // instead of the one that belongs to the running sbtix.
+        externalResolvers := Resolver.file("Sbtix Plugin Repo", file(sbtixPluginRepo))(using Resolver.ivyStylePatterns) +: externalResolvers.value,
+        addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
+      )
+    }
   '';
 
   generatedIdePluginCompatSbt = writeText "sbtix-generated-ide-plugin-compat.sbt" ''
+    // sbtix adds this file next to IDE-generated plugin files while it runs,
+    // and removes it when it exits.
+    //
+    // It only has an effect in the sbt process that sbtix starts: that process
+    // has the `sbtix.pluginRepo` property. An IDE that loads this build in the
+    // meantime keeps its own plugins. If sbtix was killed and left the file
+    // behind, it is safe to delete it.
     val sbtixGeneratedIdePluginModules = Set(
       "ch.epfl.scala" -> "sbt-bloop",
       "org.scalameta" -> "sbt-metals",
       "com.github.sbt" -> "sbt-jdi-tools",
     )
 
-    libraryDependencies := libraryDependencies.value.filterNot { dep =>
-      sbtixGeneratedIdePluginModules.exists { case (organization, name) =>
-        dep.organization == organization &&
-        (dep.name == name || dep.name.startsWith(name + "_"))
-      }
-    }
+    if (sys.props.contains("sbtix.pluginRepo")) Seq[Setting[?]](
+      libraryDependencies := libraryDependencies.value.filterNot { dep =>
+        sbtixGeneratedIdePluginModules.exists { case (organization, name) =>
+          dep.organization == organization &&
+          (dep.name == name || dep.name.startsWith(name + "_"))
+        }
+      },
 
-    // sbt 2 plugin builds may also load Metals/Bloop, which brings
-    // jsoniter-scala-core_2.13. sbtix uses Scala 2.13-compatible uPickle on
-    // the sbt 2 axis, so keep unused jsoniter _3 tooling edges out of the
-    // generated IDE plugin resolution graph.
-    excludeDependencies += ExclusionRule("com.github.plokhotnyuk.jsoniter-scala", "jsoniter-scala-core_3")
+      // sbt 2 plugin builds may also load Metals/Bloop, which brings
+      // jsoniter-scala-core_2.13. sbtix uses Scala 2.13-compatible uPickle on
+      // the sbt 2 axis, so keep unused jsoniter _3 tooling edges out of the
+      // generated IDE plugin resolution graph.
+      excludeDependencies += ExclusionRule("com.github.plokhotnyuk.jsoniter-scala", "jsoniter-scala-core_3"),
 
-    // Metals' generated sbt-bloop plugin can attempt to run bloopInstall while
-    // sbtix is loading recursive meta-builds. During sbtix generation that IDE
-    // export is not needed; keeping this command present as a no-op lets the
-    // build load and leaves dependency locking to sbtix.
-    commands += Command.command("bloopInstall")(identity)
+      // Metals' generated sbt-bloop plugin can attempt to run bloopInstall while
+      // sbtix is loading recursive meta-builds. During sbtix generation that IDE
+      // export is not needed; keeping this command present as a no-op lets the
+      // build load and leaves dependency locking to sbtix.
+      commands += Command.command("bloopInstall")(identity)
+    ) else Nil
   '';
 
   sbtixScript = runCommand "sbtix" {

@@ -15,6 +15,7 @@ sbtix 2 supports sbt 2.x builds only. [MIGRATION.md](MIGRATION.md) lists the ste
 
 - Run sbt in a foreground process of its own from the `sbtix` CLI, without an sbt server. Before, `sbtix genNix` and `sbtix genComposition` failed with `Not a valid key: genNix` when an sbt server was already running for the build, because the sbt 2 thin client sent the commands to that server. When no server was running, sbtix started one and left it behind.
 - Always load the plugin of the sbtix that runs. sbt 2 reuses the plugin classpath it cached in the build's `target` directory, so a build could keep loading the plugin jar of another sbtix build with the same version, or pick up a copy from `~/.ivy2/local`. sbt now finds the plugin through the fixed path `~/.sbtix/plugin-repo`, and looks there first.
+- Keep the CLI's temporary plugin files from affecting other sbt processes. They only take effect in the sbt process that sbtix starts. Before, an sbt server or IDE that loaded or reloaded the build while sbtix was running picked these files up too.
 - Evaluate `plugin/nix-exprs/sbtix.nix` with nixpkgs revisions that removed `lib.fold`.
 - Leave `target` directories out of the sources in `sbtix-generated.nix`. sbt 2 fills them with symlinks into its cache, which broke builds from a working tree in the Nix sandbox.
 

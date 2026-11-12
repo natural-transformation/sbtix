@@ -134,6 +134,9 @@ that sends commands to a background sbt server. Two things went wrong:
 
 sbtix 2 runs sbt in the foreground, in a process of its own, and never starts
 or contacts an sbt server. You can run it next to a running sbt server or IDE.
+The temporary plugin files that sbtix puts into `project/` while it runs only
+have an effect in its own sbt process. A server or IDE that reloads the build
+in that time gets nothing from them.
 
 ### Fewer changes to your home directory
 

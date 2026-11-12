@@ -56,6 +56,8 @@ rm -rf "${GLOBAL_DIR}/plugins" "${GLOBAL_DIR}/.sbtix-plugin-stamp"
 # fixed path. It points at the plugin repository of this sbtix.
 PLUGIN_REPO_LINK="${GLOBAL_DIR}/plugin-repo"
 ln -sfn "@pluginRepo@" "${PLUGIN_REPO_LINK}"
+# The property also marks the sbt process that this script starts. The plugin
+# files injected below take effect only where it is set.
 export SBT_OPTS="$SBT_OPTS -Dsbtix.pluginRepo=${PLUGIN_REPO_LINK}"
 
 # Expose the in-store plugin JAR to any sbt process launched through this
@@ -137,6 +139,11 @@ trap cleanup_injected_plugins EXIT
 # sbt 2 does not apply a global plugin to the build, so the sbtix plugin is
 # added through temporary files in the build's own plugin directories: one for
 # the build, one for its meta-build (`reload plugins`).
+#
+# Other sbt processes can load the build while these files are there, for
+# example an sbt server that reloads for an IDE. The files add nothing for
+# them: their settings apply only where `sbtix.pluginRepo` is set, and only the
+# sbt process started below has it.
 inject_generated_ide_plugin_compat_files
 inject_project_plugin "project"
 inject_project_plugin "project/project"

@@ -6,7 +6,7 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
-  sbtixSource = /nix/store/9gp52shvqnskkzh05da7klbxjqz88b9c-source;
+  sbtixSource = /nix/store/4gb2f80aa0mnl3igahrvrh5h6z6hypan-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))

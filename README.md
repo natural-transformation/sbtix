@@ -214,9 +214,12 @@ what it leaves alone:
   that Metals generated under `project/`, it also adds
   `zz-sbtix-generated-ide-plugin-compat-<pid>.sbt`, which keeps IDE-only
   plugins out of the lock files. sbtix removes all of these files when it
-  exits. If an sbt server or IDE looks at the build while they exist, it can
-  reload the build definition; it reloads again once they are gone. If sbtix is
-  killed hard (`kill -9`), delete the leftover files yourself.
+  exits. The files only have an effect in the sbt process that sbtix starts.
+  An sbt server or IDE that loads or reloads the build while they exist gets
+  no settings from them: it does not load the sbtix plugin, and it keeps its
+  own plugins. It may reload the build definition when the files appear, and
+  again once they are gone. If sbtix is killed hard (`kill -9`), delete the
+  leftover files yourself.
 
 By default, sbtix keeps verbose resolver diagnostics off for performance. To enable
 the full `[SBTIX_DEBUG]` output, set `SBTIX_DEBUG=1` (or pass `-Dsbtix.debug=true`).

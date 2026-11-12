@@ -76,7 +76,7 @@ export PATH="$PWD/result/bin:$PATH"
 ./tests/template-generation/run.sh
 ```
 
-`tests/sbt2-cli` covers the `sbtix` CLI: it rejects an sbt 1.x build, it works while an sbt server is running for the build, and it copes with plugin files that Metals generates.
+`tests/sbt2-cli` covers the `sbtix` CLI: it rejects an sbt 1.x build, it works while an sbt server is running for the build, that server can reload the build while sbtix runs, and it copes with plugin files that Metals generates.
 
 Whenever the template changes, rerun the commands above and copy the regenerated `sbtix-generated.nix` (and the example `default.nix` if you removed it) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
 

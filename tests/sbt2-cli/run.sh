@@ -27,6 +27,9 @@ sbt_version="2.0.12"
 # Set once the running-server test has started its sbt server.
 server_project=""
 
+# Set while the reload test holds an sbtix process open.
+held_sbtix_pid=""
+
 # Run the plain sbt runner (not sbtix) in a project, the way a developer or an
 # IDE does. For sbt 2 builds the runner is a thin client that talks to an sbt
 # server running in the background.
@@ -46,6 +49,11 @@ plain_sbt() {
 }
 
 cleanup() {
+  # Let a held sbtix process finish, so that it removes its temporary files.
+  if [[ -n "${held_sbtix_pid}" ]]; then
+    touch "${server_project}/release" || true
+    wait "${held_sbtix_pid}" || true
+  fi
   # Stop the sbt server of the running-server test. `--no-server` only talks to
   # a server that is already up; it never starts one.
   if [[ -n "${server_project}" ]]; then
@@ -129,6 +137,62 @@ run_sbtix_gen_nix "${server_project}"
 test "$(cat "${server_portfile}")" = "${server_before}"
 # This only passes when the original server still answers.
 plain_sbt "${server_project}" --no-server "show name"
+
+# Regression test: while sbtix runs, its temporary plugin files sit in the
+# build. Another sbt process can load the build in that time, for example a
+# server that reloads because an IDE asked for it. The files must add nothing
+# for such a process. Before, the reload failed and the server went down.
+#
+# To make the timing certain, sbtix runs a task that waits. The task creates
+# the file `held` once sbtix has loaded the build, and returns when the file
+# `release` exists.
+cat >> "${server_project}/build.sbt" <<'EOF'
+
+val holdUntilReleased = taskKey[Unit]("Create the file `held`, then wait until the file `release` exists.")
+
+holdUntilReleased := Def.uncached {
+  val base = baseDirectory.value
+  IO.touch(base / "held")
+  while (!(base / "release").exists) Thread.sleep(200)
+}
+EOF
+
+(
+  cd "${server_project}"
+  export HOME="${server_project}/home"
+  "${SBTIX_BIN}" --error holdUntilReleased
+) &
+held_sbtix_pid=$!
+
+# Wait until sbtix has loaded the build. Give up when sbtix exits early.
+for _ in $(seq 1 600); do
+  if [[ -e "${server_project}/held" ]] || ! kill -0 "${held_sbtix_pid}" 2>/dev/null; then
+    break
+  fi
+  sleep 1
+done
+test -e "${server_project}/held"
+test -n "$(find "${server_project}/project" -maxdepth 1 -name 'sbtix-auto-plugin-*.sbt')"
+
+# The server reloads the build with the temporary files in it, and keeps
+# working.
+plain_sbt "${server_project}" --client reload
+plain_sbt "${server_project}" --client "show name"
+# The files added nothing to the server: it does not know the sbtix tasks.
+if plain_sbt "${server_project}" --client genNix; then
+  echo "ERROR: the running sbt server loaded the sbtix plugin" >&2
+  exit 1
+fi
+
+# sbtix finishes normally and removes its files.
+touch "${server_project}/release"
+wait "${held_sbtix_pid}"
+held_sbtix_pid=""
+test -z "$(find "${server_project}/project" -name 'sbtix-auto-plugin-*.sbt')"
+
+# The server reloads once more, now without the files.
+plain_sbt "${server_project}" --client reload
+plain_sbt "${server_project}" --client "show name"
 
 sbt_plugin_project="$(create_project "sbtix-sbt2-cli-with-sbt-plugin")"
 cat > "${sbt_plugin_project}/project/plugins.sbt" <<'EOF'
