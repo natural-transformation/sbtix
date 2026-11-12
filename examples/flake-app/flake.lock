@@ -29,16 +29,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1780605101,
-        "narHash": "sha256-JupZqO7XUNE+cC4wTGDtjAvwlWYT4jXFwjdcuyMSDcw=",
+        "lastModified": 1794508813,
+        "narHash": "sha256-T9KmVJv+QiTrfyEYYKxSxQ/tk06jVKwPjgf1N/+mrpw=",
         "owner": "natural-transformation",
         "repo": "sbtix",
-        "rev": "e2d4f820cec08a63adb65268c7bd28ff0159efb7",
+        "rev": "20cef5285b4024e2b0ce5ffbda8e1ed28da4817b",
         "type": "github"
       },
       "original": {
         "owner": "natural-transformation",
-        "ref": "v1.0.1",
+        "ref": "v2.0.0",
         "repo": "sbtix",
         "type": "github"
       }
