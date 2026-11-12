@@ -4,6 +4,8 @@ name := "tmpl-gen-test"
 
 version := "0.1.0-SNAPSHOT"
 
-mainClass in Compile := Some("Main")
+scalaVersion := "3.9.0"
+
+Compile / mainClass := Some("Main")
 
 enablePlugins(JavaAppPackaging)

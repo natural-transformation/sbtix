@@ -1,5 +1,5 @@
 object Two {
-  def doStuff() {
+  def doStuff(): Unit = {
     println("Hello from two")
   }
 }

@@ -259,7 +259,7 @@ class CoursierArtifactFetcherSpec extends AnyFlatSpec with Matchers {
     val sbtPluginReleases =
       Resolver.url(
         "sbt-plugin-releases",
-        sbt.url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+        java.net.URI.create("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/").toURL
       )(Patterns(ivyPattern))
 
     val fetcher = new CoursierArtifactFetcher(

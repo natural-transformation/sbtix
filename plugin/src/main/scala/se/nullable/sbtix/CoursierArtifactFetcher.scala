@@ -578,7 +578,11 @@ class CoursierArtifactFetcher(
      */
     val fetch = ResolutionProcess.fetch(repos, CacheFetch_WithCollector())
 
-    def go(deps: Set[CDependency]): (Set[(CDependency, CArtifact)], ResolutionErrors) = {
+    /* `visited` holds the dependencies that are already being resolved further up
+     * the call chain. A dependency is never resolved on its own twice, so the
+     * recursion ends even if a dependency keeps looking unresolved.
+     */
+    def go(deps: Set[CDependency], visited: Set[ModuleVersion]): (Set[(CDependency, CArtifact)], ResolutionErrors) = {
       val configured = Resolution()
         .withRootDependencies(deps.toSeq)
         .withDefaultConfiguration(Configuration.defaultCompile)
@@ -589,8 +593,10 @@ class CoursierArtifactFetcher(
 
       val resolution = configured.process.run(fetch, maxIterations = 100).unsafeRun()
 
-      val missingDependencies = findMissingDependencies(deps, resolution)
-      val resolvedMissingDependencies = missingDependencies.map(md => go(Set(md)))
+      val nowVisited = visited ++ deps.map(moduleVersion)
+      val missingDependencies =
+        findMissingDependencies(deps, resolution).filterNot(md => nowVisited(moduleVersion(md)))
+      val resolvedMissingDependencies = missingDependencies.map(md => go(Set(md), nowVisited))
 
       val mainArtifacts = resolution.dependencyArtifacts().toSet
       val classifierArtifacts =
@@ -614,12 +620,32 @@ class CoursierArtifactFetcher(
       (artifacts, errors)
     }
 
-    go(modules)
+    go(modules, Set.empty)
+  }
+
+  /** What a dependency selects: a module at a version. */
+  private type ModuleVersion = (CModule, String)
+
+  private def moduleVersion(dep: CDependency): ModuleVersion =
+    (dep.module, dep.versionConstraint.asString)
+
+  /** A dependency is resolved when the resolution selected the same module at
+    * the same version.
+    *
+    * Do not use `resolution.dependencies.contains(dep)` here. Since coursier
+    * 2.1.25 a resolution keeps its own normalized copies of the dependencies
+    * (for example of the `optional` flag, or of an empty configuration). A
+    * dependency we built ourselves is then never equal to its resolved copy,
+    * and it would look unresolved forever.
+    */
+  private def isResolved(dep: CDependency, resolution: Resolution): Boolean = {
+    val wanted = moduleVersion(dep)
+    resolution.dependencies.exists(resolved => moduleVersion(resolved) == wanted)
   }
 
   private def findMissingDependencies(dependencies: Set[CDependency], resolution: Resolution): Set[CDependency] =
     dependencies.flatMap { dep =>
-      if (resolution.dependencies.contains(dep))
+      if (isResolved(dep, resolution))
         findMissingDependencies(dep, resolution)
       else
         Set(dep)
@@ -642,7 +668,7 @@ class CoursierArtifactFetcher(
     val raw = getDeps(module, withReconciledVersions = false, 100)
 
     val possiblyMissing = diffDependencyTrees(raw, reconciled)
-    possiblyMissing.diff(resolution.dependencies)
+    possiblyMissing.filterNot(isResolved(_, resolution))
   }
 
   private def diffDependencyTrees(raw: RoseTree[CDependency], reconciled: RoseTree[CDependency]): Set[CDependency] = {

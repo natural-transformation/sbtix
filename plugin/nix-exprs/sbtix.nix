@@ -1,6 +1,5 @@
 # This file originates from SBTix
 { runCommand, fetchurl, lib, stdenv, jdk, jre, sbt, writeText, makeWrapper, gawk
-, extraPluginRepos ? []
 }:
 let
     inherit (lib)
@@ -9,7 +8,7 @@ let
       concatMap
       concatStringsSep
       flatten
-      fold
+      foldr
       init
       mapAttrsToList
       optionalString
@@ -188,6 +187,17 @@ let
   '';
 
 in rec {
+    # Leaves sbt build output (`target` directories) out of a source tree.
+    #
+    # Build output is not source. With sbt 2 it also holds symlinks into the sbt
+    # cache, which do not exist inside the Nix sandbox. Use this for a `src`
+    # that is a working directory, for example:
+    #   src = sbtix.withoutSbtOutput (lib.cleanSource ./.);
+    withoutSbtOutput = src: lib.cleanSourceWith {
+      inherit src;
+      filter = path: type: !(type == "directory" && baseNameOf path == "target");
+    };
+
     mkRepo = name: artifacts: localBuildsRepo: runCommand name {}
         (let
             parentDirs = filePath:
@@ -297,28 +307,19 @@ in rec {
     ivyRepoPattern = "[organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]";
 
     mergeAttr = attr: repo:
-        fold (a: b: a // b) {} (catAttrs attr repo);
+        foldr (a: b: a // b) {} (catAttrs attr repo);
 
     buildSbtProject = args@{repo, name, buildInputs ? [], sbtixBuildInputs ? "", sbtOptions ? "", pluginBootstrap ? "", ...}:
       let
-          pluginRepoCandidates = [
-            ./sbtix-plugin-repo.nix
-            ../sbtix-plugin-repo.nix
-          ];
-          pluginRepos =
-            concatLists (map
-              (path: if builtins.pathExists path then [ (import path) ] else [])
-              pluginRepoCandidates) ++ extraPluginRepos;
-          mergedRepo = repo ++ pluginRepos;
           localBuildsRepo =
             if builtins.typeOf sbtixBuildInputs == "list" then
               abort "Update notice: see the sbtix README to learn how to use 'sbtixBuildInputs'"
             else
               sbtixBuildInputs;
-          versionings = unique (flatten (catAttrs "versioning" mergedRepo));
+          versionings = unique (flatten (catAttrs "versioning" repo));
           scalaVersion = (builtins.head versionings).scalaVersion;
-          artifacts = mergeAttr "artifacts" mergedRepo;
-          repos = mergeAttr "repos" mergedRepo;
+          artifacts = mergeAttr "artifacts" repo;
+          repos = mergeAttr "repos" repo;
           nixrepo = mkRepo "${name}-repo" artifacts localBuildsRepo;
 
           localRepoEntry = "local";

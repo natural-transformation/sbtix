@@ -2,7 +2,7 @@
 , jdk, jre, sbt, selfSourceInfo ? {}
 }:
 let
-  version = "1.2.8";
+  version = "2.0.0";
   versionSnapshotSuffix = "";
   pluginVersion = "${version}${versionSnapshotSuffix}";
 
@@ -13,29 +13,14 @@ let
   sourceNarHash = selfSourceInfo.narHash or (builtins.getEnv "SBTIX_SOURCE_NAR_HASH");
   sourcePath = selfSourceInfo.outPath or (builtins.getEnv "SBTIX_SOURCE_PATH");
 
-  pluginBootstrapSnippet = import ./plugin/nix-exprs/plugin-bootstrap-snippet.nix {
-    version = pluginVersion;
-  };
+  # sbt 2 publishes plugins as `<name>_sbt<sbt major>_<scala binary>`.
+  sbtixPluginArtifact = "sbtix_sbt2_3";
 
-  sbtixPluginRepoOrgPath =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix";
+  sbtixPluginJarPath =
+    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/${sbtixPluginArtifact}/${pluginVersion}/jars/${sbtixPluginArtifact}.jar";
 
-  sbtixPluginJarPathSbt1 =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
-
-  sbtixPluginJarPathSbt2 =
-    "${sbtixPluginRepo}/plugin-repo/se.nullable.sbtix/sbtix_sbt2_3/${pluginVersion}/jars/sbtix_sbt2_3.jar";
-
-  sbtixNix = writeText "sbtix.nix" (builtins.replaceStrings
-    [ "\${plugin-version}" "{{PLUGIN_BOOTSTRAP_SNIPPET}}" ]
-    [ pluginVersion pluginBootstrapSnippet ]
-    (builtins.readFile ./plugin/nix-exprs/sbtix.nix));
-
-  sbtix = callPackage sbtixNix {
+  sbtix = callPackage ./plugin/nix-exprs/sbtix.nix {
     inherit jdk jre sbt;
-    extraPluginRepos = [
-      (import ./plugin/sbtix-plugin-repo.nix)
-    ];
   };
 
   sbtixPluginRepo = sbtix.buildSbtProject {
@@ -43,49 +28,82 @@ let
 
         src = ./plugin;
         repo = [ (import ./plugin/repo.nix)
-                 (import ./plugin/repo-sbt2.nix)
                  (import ./plugin/project/repo.nix)
                  (import ./plugin/nix-exprs/manual-repo.nix)
                ];
 
+        # `--server` makes the sbt runner start sbt in the foreground. A bare
+        # `sbt` would go through the thin client and a background server.
         installPhase =''
-          sbt +publishLocal
+          sbt --server publishLocal
           mkdir -p $out/plugin-repo
           cp -r ./.ivy2-home/local/. $out/plugin-repo/
         '';
   };
 
-  pluginsSbtix = writeText "plugins.sbt" ''
-    resolvers += Resolver.file("Sbtix Plugin Repo", file("${sbtixPluginRepo}/plugin-repo"))(Resolver.ivyStylePatterns)
+  # The two files below are added to a build while the `sbtix` wrapper runs.
+  #
+  # Other sbt processes can load the build in that time: an sbt server that
+  # reloads, an IDE, a second terminal. The files must not change anything for
+  # them. So every setting in them depends on the `sbtix.pluginRepo` property,
+  # which only the sbt process started by the wrapper has. Without it, a file
+  # contributes no settings at all.
 
-    addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
+  # The plugin definition. The wrapper passes the plugin repository as
+  # `sbtix.pluginRepo`.
+  pluginsSbtix = writeText "plugins.sbt" ''
+    // sbtix adds this file while it runs, and removes it when it exits.
+    //
+    // It only has an effect in the sbt process that sbtix starts: that process
+    // has the `sbtix.pluginRepo` property. Any other sbt process that loads
+    // this build gets no settings from this file. If sbtix was killed and left
+    // the file behind, it is safe to delete it.
+    sys.props.get("sbtix.pluginRepo").toSeq.flatMap { sbtixPluginRepo =>
+      Seq[Setting[?]](
+        // Look in the sbtix plugin repository first. sbt asks ~/.ivy2/local before
+        // any other resolver, so without this it would load an sbtix plugin that
+        // someone published locally (`sbt publishLocal` in an sbtix checkout)
+        // instead of the one that belongs to the running sbtix.
+        externalResolvers := Resolver.file("Sbtix Plugin Repo", file(sbtixPluginRepo))(using Resolver.ivyStylePatterns) +: externalResolvers.value,
+        addSbtPlugin("se.nullable.sbtix" % "sbtix" % "${pluginVersion}")
+      )
+    }
   '';
 
   generatedIdePluginCompatSbt = writeText "sbtix-generated-ide-plugin-compat.sbt" ''
+    // sbtix adds this file next to IDE-generated plugin files while it runs,
+    // and removes it when it exits.
+    //
+    // It only has an effect in the sbt process that sbtix starts: that process
+    // has the `sbtix.pluginRepo` property. An IDE that loads this build in the
+    // meantime keeps its own plugins. If sbtix was killed and left the file
+    // behind, it is safe to delete it.
     val sbtixGeneratedIdePluginModules = Set(
       "ch.epfl.scala" -> "sbt-bloop",
       "org.scalameta" -> "sbt-metals",
       "com.github.sbt" -> "sbt-jdi-tools",
     )
 
-    libraryDependencies := libraryDependencies.value.filterNot { dep =>
-      sbtixGeneratedIdePluginModules.exists { case (organization, name) =>
-        dep.organization == organization &&
-        (dep.name == name || dep.name.startsWith(name + "_"))
-      }
-    }
+    if (sys.props.contains("sbtix.pluginRepo")) Seq[Setting[?]](
+      libraryDependencies := libraryDependencies.value.filterNot { dep =>
+        sbtixGeneratedIdePluginModules.exists { case (organization, name) =>
+          dep.organization == organization &&
+          (dep.name == name || dep.name.startsWith(name + "_"))
+        }
+      },
 
-    // sbt 2 plugin builds may also load Metals/Bloop, which brings
-    // jsoniter-scala-core_2.13. sbtix uses Scala 2.13-compatible uPickle on
-    // the sbt 2 axis, so keep unused jsoniter _3 tooling edges out of the
-    // generated IDE plugin resolution graph.
-    excludeDependencies += ExclusionRule("com.github.plokhotnyuk.jsoniter-scala", "jsoniter-scala-core_3")
+      // sbt 2 plugin builds may also load Metals/Bloop, which brings
+      // jsoniter-scala-core_2.13. sbtix uses Scala 2.13-compatible uPickle on
+      // the sbt 2 axis, so keep unused jsoniter _3 tooling edges out of the
+      // generated IDE plugin resolution graph.
+      excludeDependencies += ExclusionRule("com.github.plokhotnyuk.jsoniter-scala", "jsoniter-scala-core_3"),
 
-    // Metals' generated sbt-bloop plugin can attempt to run bloopInstall while
-    // sbtix is loading recursive meta-builds. During sbtix generation that IDE
-    // export is not needed; keeping this command present as a no-op lets the
-    // build load and leaves dependency locking to sbtix.
-    commands += Command.command("bloopInstall")(identity)
+      // Metals' generated sbt-bloop plugin can attempt to run bloopInstall while
+      // sbtix is loading recursive meta-builds. During sbtix generation that IDE
+      // export is not needed; keeping this command present as a no-op lets the
+      // build load and leaves dependency locking to sbtix.
+      commands += Command.command("bloopInstall")(identity)
+    ) else Nil
   '';
 
   sbtixScript = runCommand "sbtix" {
@@ -95,9 +113,8 @@ let
       --replace @shell@ ${runtimeShell} \
       --replace @plugin@ ${pluginsSbtix} \
       --replace @generatedIdePluginCompat@ ${generatedIdePluginCompatSbt} \
-      --replace @pluginRepoOrg@ ${sbtixPluginRepoOrgPath} \
-      --replace @pluginJarSbt1@ ${sbtixPluginJarPathSbt1} \
-      --replace @pluginJarSbt2@ ${sbtixPluginJarPathSbt2} \
+      --replace @pluginRepo@ ${sbtixPluginRepo}/plugin-repo \
+      --replace @pluginJar@ ${sbtixPluginJarPath} \
       --replace @sbt@ ${sbt}/bin/sbt \
       --replace @sourceRev@ "${sourceRev}" \
       --replace @sourceNarHash@ "${sourceNarHash}" \

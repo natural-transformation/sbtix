@@ -22,7 +22,9 @@ ensure_local_sbtix_source() {
 ensure_local_sbtix_source
 rm -f ./sbtix-plugin-under-test.jar
 rm -f ./default.nix
-rm -rf ./project/target ./project/project/target
+# sbt 2 keeps the build caches of the build and of its meta-builds in the
+# top-level `target` directory.
+rm -rf ./target ./project/target ./project/project/target
 for f in {,project/}repo.nix; do
   if [[ -e "$f" ]]; then
     rm "$f"
@@ -41,5 +43,5 @@ if grep -q 'sbtix-plugin-under-test.jar' sbtix-generated.nix; then
 fi
 grep -Eq 'sbtixSource = /nix/store/|rev = "[0-9a-f]{40}"' sbtix-generated.nix
 grep -q 'builtins.readDir' sbtix-generated.nix
-grep -q 'scala_2.12/sbt_1.0/${pluginVersion}' sbtix-generated.nix
+grep -q 'sbtix_sbt2_3/${pluginVersion}' sbtix-generated.nix
 nix-build

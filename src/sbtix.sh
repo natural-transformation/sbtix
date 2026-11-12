@@ -10,15 +10,16 @@ detect_project_sbt_version() {
   fi
 }
 
+# sbtix supports sbt 2.x builds only. A build that does not set `sbt.version`
+# runs on the sbt runner's own version, which is sbt 2.
 SBTIX_SBT_VERSION="$(detect_project_sbt_version)"
 case "${SBTIX_SBT_VERSION}" in
-  2.*)
-    SBTIX_SBT_MAJOR=2
-    SBTIX_PLUGIN_JAR_PATH="@pluginJarSbt2@"
+  "" | 2.*)
     ;;
   *)
-    SBTIX_SBT_MAJOR=1
-    SBTIX_PLUGIN_JAR_PATH="@pluginJarSbt1@"
+    echo "sbtix: this build uses sbt ${SBTIX_SBT_VERSION} (project/build.properties), but sbtix 2 supports sbt 2.x only." >&2
+    echo "sbtix: use sbtix 1.2.8 for sbt 1.x builds, or move the build to sbt 2." >&2
+    exit 1
     ;;
 esac
 
@@ -34,45 +35,34 @@ esac
 # appending our value makes the JVM pick up the last one.
 SBT_OPTS="${SBT_OPTS} -Duser.home=${HOME}"
 
-IVY_LOCAL_ROOT="${HOME}/.ivy2/local"
-IVY_LOCAL="${IVY_LOCAL_ROOT}/se.nullable.sbtix"
-if [ -e "${IVY_LOCAL}" ] || [ -L "${IVY_LOCAL}" ]; then
-  echo "Deleting any cached sbtix plugins in '~/.ivy2/local'. So the most recent version from nix is used."
-  rm -rf "${IVY_LOCAL}"
-fi
-mkdir -p "${IVY_LOCAL_ROOT}"
-ln -s "@pluginRepoOrg@" "${IVY_LOCAL}"
-
+# Force sbt to use a deterministic, user-writable global base of its own. This
+# keeps personal global sbt plugins and settings out of the generated locks,
+# and avoids hitting system locations like /var/empty.
 GLOBAL_DIR="${HOME}/.sbtix"
-PLUGIN_DIR="${GLOBAL_DIR}/plugins"
-# Force sbt to use a deterministic, user-writable global base so we can drop in
-# the sbtix plugin wrapper and avoid hitting system locations like /var/empty.
-mkdir -p "${PLUGIN_DIR}"
+mkdir -p "${GLOBAL_DIR}"
 
-# Invalidate the compiled global-plugins build when switching sbtix wrappers.
+# sbtix 1.x loaded its plugin through a global plugin definition in this
+# directory. sbt 2 would still load that stale definition, so remove it.
+rm -rf "${GLOBAL_DIR}/plugins" "${GLOBAL_DIR}/.sbtix-plugin-stamp"
+
+# Let sbt find the sbtix plugin at a path that stays the same for every sbtix.
 #
-# Why: sbt caches the compiled "global plugins" build under:
-#   ${PLUGIN_DIR}/project/** and ${PLUGIN_DIR}/target/**
-# When sbtix is upgraded/downgraded, the global plugin definition we symlink
-# (`sbtix_plugin.sbt`) changes, but sbt may still reuse the old compiled build
-# and keep trying to resolve the old sbtix plugin version (e.g. 0.4-SNAPSHOT).
-# This is especially likely with Nix store files, which often have an epoch
-# mtime that can confuse file-change detection.
-PLUGIN_STAMP_FILE="${GLOBAL_DIR}/.sbtix-plugin-stamp"
-CURRENT_PLUGIN_STAMP="@plugin@|${SBTIX_PLUGIN_JAR_PATH}|sbt-${SBTIX_SBT_MAJOR}"
-OLD_PLUGIN_STAMP=""
-if [ -f "${PLUGIN_STAMP_FILE}" ]; then
-  OLD_PLUGIN_STAMP="$(cat "${PLUGIN_STAMP_FILE}" 2>/dev/null || true)"
-fi
-if [ "${OLD_PLUGIN_STAMP}" != "${CURRENT_PLUGIN_STAMP}" ]; then
-  echo "sbtix: detected a different wrapper/plugin; clearing global plugin build caches"
-  rm -rf "${PLUGIN_DIR}/project" "${PLUGIN_DIR}/target"
-  printf '%s' "${CURRENT_PLUGIN_STAMP}" > "${PLUGIN_STAMP_FILE}"
-fi
+# Why: sbt keeps the resolved plugin classpath in the build's `target`
+# directory, and it reuses it as long as the plugin version is the same. It
+# does not look at where the plugin came from. If the plugin files sat at the
+# store path of this sbtix, a build that was last used with another sbtix of
+# the same version (for example before a nixpkgs update) would keep loading
+# that other plugin jar, or fail when the jar is gone. The link below is the
+# fixed path. It points at the plugin repository of this sbtix.
+PLUGIN_REPO_LINK="${GLOBAL_DIR}/plugin-repo"
+ln -sfn "@pluginRepo@" "${PLUGIN_REPO_LINK}"
+# The property also marks the sbt process that this script starts. The plugin
+# files injected below take effect only where it is set.
+export SBT_OPTS="$SBT_OPTS -Dsbtix.pluginRepo=${PLUGIN_REPO_LINK}"
 
 # Expose the in-store plugin JAR to any sbt process launched through this
 # wrapper so generated nix expressions can reference it directly.
-export SBT_OPTS="$SBT_OPTS -Dsbtix.pluginJarPath=${SBTIX_PLUGIN_JAR_PATH}"
+export SBT_OPTS="$SBT_OPTS -Dsbtix.pluginJarPath=@pluginJar@"
 
 # Prefer the in-store checkout of the sbtix sources that produced this wrapper.
 # This keeps generated Nix files fully offline (no GitHub fetch) in CI and in
@@ -90,18 +80,7 @@ fi
 export SBT_OPTS="$SBT_OPTS -Dcoursier.cache=${GLOBAL_DIR}/.coursier-cache"
 export COURSIER_CACHE="${GLOBAL_DIR}/.coursier-cache/v1"
 
-# Also purge cached copies of the sbtix plugin to make sure we always load the
-# freshly built jar from the nix store. Otherwise Ivy may silently reuse an old
-# snapshot, which then misses the latest template fixes.
-IVY_CACHE_DIR="${HOME}/.ivy2/cache/se.nullable.sbtix"
-if [ -d "${IVY_CACHE_DIR}" ]; then
-  echo "Deleting cached sbtix plugin from '~/.ivy2/cache' so the nix-built jar is reloaded."
-  rm -rf "${IVY_CACHE_DIR}"
-fi
-
 export SBT_OPTS="-Dsbt.global.base=${GLOBAL_DIR}${SBT_OPTS:+ ${SBT_OPTS}}"
-echo "Updating ${PLUGIN_DIR}/sbtix_plugin.sbt symlink"
-ln -sf "@plugin@" "${PLUGIN_DIR}/sbtix_plugin.sbt"
 
 INJECTED_PLUGIN_FILES=""
 CREATED_PLUGIN_DIRS=""
@@ -112,9 +91,6 @@ cleanup_injected_plugins() {
       rm -f "${file}"
     fi
   done
-  if [ -L "${IVY_LOCAL}" ] && [ "$(readlink "${IVY_LOCAL}")" = "@pluginRepoOrg@" ]; then
-    rm -f "${IVY_LOCAL}"
-  fi
   for dir in ${CREATED_PLUGIN_DIRS}; do
     rmdir "${dir}" 2>/dev/null || true
   done
@@ -160,11 +136,17 @@ inject_generated_ide_plugin_compat_files() {
 
 trap cleanup_injected_plugins EXIT
 
-if [ "${SBTIX_SBT_MAJOR}" = 2 ]; then
-  inject_generated_ide_plugin_compat_files
-  inject_project_plugin "project"
-  inject_project_plugin "project/project"
-fi
+# sbt 2 does not apply a global plugin to the build, so the sbtix plugin is
+# added through temporary files in the build's own plugin directories: one for
+# the build, one for its meta-build (`reload plugins`).
+#
+# Other sbt processes can load the build while these files are there, for
+# example an sbt server that reloads for an IDE. The files add nothing for
+# them: their settings apply only where `sbtix.pluginRepo` is set, and only the
+# sbt process started below has it.
+inject_generated_ide_plugin_compat_files
+inject_project_plugin "project"
+inject_project_plugin "project/project"
 
 if [ -n "@sourceRev@" ] && [ -n "@sourceNarHash@" ]; then
   export SBTIX_SOURCE_URL="@sourceUrl@"
@@ -182,35 +164,47 @@ if [ "$#" -gt 0 ]; then
     genNix)
       # Run genNix for the main build, reload into the meta-build to capture
       # plugin dependencies, then return to the main build.
-      if [ "${SBTIX_SBT_MAJOR}" = 2 ]; then
-        set -- "; genNix; reload plugins; genNix; reload return"
-      else
-        set -- \
-          genNix \
-          "reload plugins" \
-          genNix \
-          "reload return"
-      fi
+      set -- \
+        genNix \
+        "reload plugins" \
+        genNix \
+        "reload return"
       ;;
     genComposition)
       # Ensure both the project and meta-build repos are up-to-date before
       # emitting sbtix-generated.nix.
-      if [ "${SBTIX_SBT_MAJOR}" = 2 ]; then
-        set -- "; genNix; reload plugins; genNix; reload return; genComposition"
-      else
-        set -- \
-          genNix \
-          "reload plugins" \
-          genNix \
-          "reload return" \
-          genComposition
-      fi
+      set -- \
+        genNix \
+        "reload plugins" \
+        genNix \
+        "reload return" \
+        genComposition
       ;;
   esac
 fi
 
+# Run sbt in a JVM of our own that takes no part in the sbt server protocol.
+#
+# Why: for sbt 2 builds the sbt runner defaults to the thin client (`sbtn`).
+# The client hands the commands to the server recorded in
+# `project/target/active.json`. A server that is already running for this
+# project was started without the plugin files and options set up above, so
+# `genNix` does not exist there. And when no server is running, the client
+# starts one that keeps running after this script has removed the plugin files
+# it loaded.
+#
+# - `--server` makes the runner start the sbt JVM in the foreground instead of
+#   the thin client. It has to be a runner argument: the runner picks the launch
+#   mode before it looks at SBT_OPTS.
+# - `-Dsbt.server.autostart=false` keeps that JVM from starting a server of its
+#   own. It never writes `project/target/active.json`, so a server that is
+#   already running for this project stays reachable, and nothing is left
+#   running when sbtix exits. It goes last in SBT_OPTS, so it wins over a value
+#   set by the caller.
+export SBT_OPTS="${SBT_OPTS} -Dsbt.server.autostart=false"
+
 set +e
-@sbt@ "$@"
+@sbt@ --server "$@"
 status=$?
 set -e
 trap - EXIT

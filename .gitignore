@@ -7,7 +7,10 @@ tests/*/repo.nix
 
 # sbtix tests generate these files at runtime; they should not be checked in.
 tests/**/sbtix.nix
-tests/**/sbtix-plugin-repo.nix
+
+# `sbtix genNix` in plugin/ also locks the meta-meta-build. Nothing imports
+# that file: plugin/repo.nix and plugin/project/repo.nix cover the plugin build.
+plugin/project/project/repo.nix
 .ensime_cache
 .ensime
 .bloop

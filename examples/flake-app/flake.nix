@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    sbtix.url = "github:natural-transformation/sbtix/v1.2.8";
+    sbtix.url = "github:natural-transformation/sbtix/v2.0.0";
     sbtix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
@@ -35,7 +35,8 @@
         in {
           default = sbtixLib.buildSbtProgram {
             name = "flake-app-example";
-            src = pkgs.lib.cleanSource ./.;
+            # `withoutSbtOutput` leaves sbt's `target` directories out of the build.
+            src = sbtixLib.withoutSbtOutput (pkgs.lib.cleanSource ./.);
             repo = [
               (import ./manual-repo.nix)
               (import ./repo.nix)

@@ -1,20 +1,36 @@
 ## Testing
 
+The plugin is an sbt 2 build. Run every command below inside `nix develop`.
+
+Call sbt as `sbt --server ...`. A bare `sbt` is the sbt 2 thin client, which
+leaves an sbt server running in the background. `--server` runs sbt in the
+foreground and exits when the command is done.
+
+### Unit tests
+
+```bash
+cd plugin
+sbt --server testFull
+```
+
+`testFull` runs every test. In sbt 2, `test` only runs the tests that changed
+since the last successful run.
+
 ### Scripted
 
-`sbt scripted` runs all scripted suites under `plugin/src/sbt-test`.
+`sbt --server scripted` runs all scripted suites under `plugin/src/sbt-test`.
 In this repository, the intended command is to run only the sbtix suites:
-`sbt "scripted sbtix/*"`.
+`sbt --server "scripted sbtix/*"`.
 
 Note that for the `sbtix/private-auth` test you will need to have the `./serve-authenticated.py` server running. For example, `python3 serve-authenticated.py` in the nix shell. 
 
-To run one example, run `sbt scripted sbtix/simple`.
+To run one example, run `sbt --server "scripted sbtix/simple"`.
 
 When you touch the templates under `plugin/src/main/resources/sbtix/` (for example `default.nix.template` or `generated.nix.template`), regenerate the fixtures by running, for example:
 
 ```bash
 # NOTE: Keep `plugin.version` in sync with `plugin/build.sbt` (`version := ...`).
-(cd plugin/src/sbt-test/sbtix/simple && sbt --error -Dplugin.version=1.2.8 "clean" "genNix" "genComposition")
+(cd plugin/src/sbt-test/sbtix/simple && sbt --server --error -Dplugin.version=2.0.0 "clean" "genNix" "genComposition")
 ```
 
 The scripted tests assert the stable generated-repository contract with targeted checks and a full `nix-build`. They do not exact-mirror every generated `repo.nix` entry, because Coursier can expose additional cached POM metadata that is useful but not part of sbtix's behavioral contract.
@@ -36,11 +52,16 @@ nix build '.#sbtix'
 
 cd plugin
 ../result/bin/sbtix genNix          # refreshes plugin/repo.nix and plugin/project/repo.nix
-../result/bin/sbtix genComposition  # refreshes plugin/sbtix-generated.nix and sample default.nix if needed
-../result/bin/sbtix-gen-all2        # produces project/project/repo.nix
 ```
 
-Commit the updated files (`plugin/repo.nix`, `plugin/project/repo.nix`, `plugin/sbtix-plugin-repo.nix`, and optionally `plugin/default.nix`) along with your dependency changes. Use the environment exports only when testing local sbtix changes.
+Commit the updated files (`plugin/repo.nix` and `plugin/project/repo.nix`) along with your dependency changes. `genNix` also writes `plugin/project/project/repo.nix`. Nothing imports that file, and git ignores it.
+
+`nix build '.#sbtix'` builds the plugin offline from these locks. So when the locks are stale, the build fails before you get a CLI to regenerate them. In that case, run `genNix` with the last released sbtix:
+
+```bash
+cd plugin
+nix shell github:natural-transformation/sbtix --command sbtix genNix
+```
 
 ### Integration
 
@@ -50,11 +71,16 @@ The `tests` directory contains the integration suites that validate multi-projec
 nix develop             # loads sbt + nix for this repository
 nix build '.#sbtix'     # produces ./result/bin/sbtix for the test scripts
 export PATH="$PWD/result/bin:$PATH"
+./tests/sbt2-cli/run.sh
 ./tests/multi-build/run.sh
 ./tests/template-generation/run.sh
 ```
 
-Whenever the template or bootstrap snippet changes, rerun the commands above and copy the regenerated `sbtix-generated.nix` (and the example `default.nix` if you removed it) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
+`tests/sbt2-cli` covers the `sbtix` CLI: it rejects an sbt 1.x build, it works while an sbt server is running for the build, that server can reload the build while sbtix runs, and it copes with plugin files that Metals generates.
+
+Whenever the template changes, rerun the commands above and copy the regenerated `sbtix-generated.nix` (and the example `default.nix` if you removed it) from each test directory back into `tests/**`. Those fixtures should always reflect the current generator output rather than manual edits.
+
+On macOS, a Nix build can stop with `sandbox initialization failed: data object length ... exceeds maximum`. The macOS sandbox cannot handle a derivation with more than roughly 950 input paths, and every locked artifact is one input. Build such a project on Linux, or with the Nix sandbox turned off.
 
 #### CI
 

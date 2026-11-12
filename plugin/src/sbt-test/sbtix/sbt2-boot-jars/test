@@ -5,8 +5,8 @@ $ exists project/repo.nix
 # sbt 2 bootstraps through Scala 3 artifacts before the build can load in an
 # offline Nix sandbox. Locking only the POMs leaves `nix build` unable to start
 # sbt at all, so guard a representative slice of the boot classpath here.
-$ exec grep -q 'org/scala-sbt/sbt/2.0.0/sbt-2.0.0.jar' project/repo.nix
-$ exec grep -q 'org/scala-sbt/main_3/2.0.0/main_3-2.0.0.jar' project/repo.nix
-$ exec grep -q 'org/scala-sbt/zinc_3/2.0.0/zinc_3-2.0.0.jar' project/repo.nix
-$ exec grep -q 'org/scala-sbt/librarymanagement-core_3/2.0.0/librarymanagement-core_3-2.0.0.jar' project/repo.nix
+$ exec grep -q 'org/scala-sbt/sbt/2.0.12/sbt-2.0.12.jar' project/repo.nix
+$ exec grep -q 'org/scala-sbt/main_3/2.0.12/main_3-2.0.12.jar' project/repo.nix
+$ exec grep -q 'org/scala-sbt/zinc_3/2.0.5/zinc_3-2.0.5.jar' project/repo.nix
+$ exec grep -q 'org/scala-sbt/librarymanagement-core_3/2.0.12/librarymanagement-core_3-2.0.12.jar' project/repo.nix
 $ exec grep -q 'org/scala-lang/modules/scala-xml_3/2.4.0/scala-xml_3-2.4.0.jar' project/repo.nix

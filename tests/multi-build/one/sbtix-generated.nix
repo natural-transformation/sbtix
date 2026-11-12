@@ -6,26 +6,25 @@ let
   sbtix = pkgs.callPackage ./sbtix.nix {};
   inherit (pkgs.lib) optional;
 
-  sbtixSource = /nix/store/h4drkq5ysivpj29bghzlh381d52kld15-source;
+  sbtixSource = /nix/store/4gb2f80aa0mnl3igahrvrh5h6z6hypan-source;
 
   sbtixPluginRepos = [
     (import (sbtixSource + "/plugin/repo.nix"))
-    (import (sbtixSource + "/plugin/repo-sbt2.nix"))
     (import (sbtixSource + "/plugin/project/repo.nix"))
     (import (sbtixSource + "/plugin/nix-exprs/manual-repo.nix"))
   ];
 
   sbtixPluginIvy = sbtix.buildSbtLibrary {
     name = "sbtix-plugin";
-    src = cleanSource (sbtixSource + "/plugin");
+    src = sbtix.withoutSbtOutput (cleanSource (sbtixSource + "/plugin"));
     repo = sbtixPluginRepos;
   };
 
   pluginVersion =
-    let versions = builtins.attrNames (builtins.readDir "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0");
+    let versions = builtins.attrNames (builtins.readDir "${sbtixPluginIvy}/se.nullable.sbtix/sbtix_sbt2_3");
     in builtins.head versions;
 
-  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}/jars/sbtix.jar";
+  sbtixPluginJarPath = "${sbtixPluginIvy}/se.nullable.sbtix/sbtix_sbt2_3/${pluginVersion}/jars/sbtix_sbt2_3.jar";
 
 
   manualRepo = import ./manual-repo.nix;
@@ -51,17 +50,10 @@ let
         else []
     ) (builtins.attrNames rootEntries));
 
-  pluginRepoPath = ./sbtix-plugin-repo.nix;
-  pluginRepo =
-    if builtins.pathExists pluginRepoPath
-    then import pluginRepoPath
-    else null;
-
   repositories =
     [ repoLock projectRepo projectMetaRepo ]
     ++ subprojectRepos
-    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo
-    ++ optional (pluginRepo != null) pluginRepo;
+    ++ optional (builtins.length (builtins.attrNames manualRepo.artifacts) > 0) manualRepo;
   
   buildInputsPath = ./sbtix-build-inputs.nix;
   sbtixInputs =
@@ -71,43 +63,41 @@ let
 in
   sbtix.buildSbtProgram {
     name = "one";
-    src = cleanSource ./.;
+    src = sbtix.withoutSbtOutput (cleanSource ./.);
     repo = repositories;
     sbtOptions = "-Dplugin.version=${pluginVersion}";
     sbtixBuildInputs = sbtixInputs;
     pluginBootstrap = ''
       pluginJar="${sbtixPluginJarPath}"
 
-ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix/scala_2.12/sbt_1.0/${pluginVersion}"
+ivyDir="./.ivy2-home/local/se.nullable.sbtix/sbtix_sbt2_3/${pluginVersion}"
 mkdir -p "$ivyDir/jars" "$ivyDir/ivys" "$ivyDir/poms"
 if [ -n "${pluginJar:-}" ] && [ -f "$pluginJar" ]; then
-  cp "$pluginJar" $ivyDir/jars/sbtix.jar
+  cp "$pluginJar" "$ivyDir/jars/sbtix_sbt2_3.jar"
 else
   echo "sbtix: unable to locate plugin jar; ensure SBTIX_SOURCE_URL/REV/NAR_HASH or SBTIX_PLUGIN_JAR_PATH are set." 1>&2
   exit 1
 fi
-  cat <<POM_EOF > $ivyDir/poms/sbtix-${pluginVersion}.pom
+  cat <<POM_EOF > "$ivyDir/poms/sbtix_sbt2_3-${pluginVersion}.pom"
     <project xmlns="http://maven.apache.org/POM/4.0.0"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
              xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
       <modelVersion>4.0.0</modelVersion>
       <groupId>se.nullable.sbtix</groupId>
-      <artifactId>sbtix</artifactId>
+      <artifactId>sbtix_sbt2_3</artifactId>
       <version>${pluginVersion}</version>
       <name>sbtix Plugin</name>
       <description>Locally provided sbtix plugin for Nix build</description>
       <packaging>jar</packaging>
     </project>
 POM_EOF
-  cat <<IVY_EOF > $ivyDir/ivys/ivy.xml
+  cat <<IVY_EOF > "$ivyDir/ivys/ivy.xml"
     <ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
       <info organisation="se.nullable.sbtix"
-            module="sbtix"
+            module="sbtix_sbt2_3"
             revision="${pluginVersion}"
             status="release"
-            publication="0000000000000"
-            e:sbtVersion="1.0"
-            e:scalaVersion="2.12">
+            publication="0000000000000">
         <description>
           sbtix plugin (locally provided for Nix build)
         </description>
@@ -122,11 +112,11 @@ POM_EOF
         <conf name="test" visibility="public" description="" extends="runtime"/>
       </configurations>
       <publications>
-        <artifact name="sbtix" type="jar" ext="jar" conf="compile"/>
+        <artifact name="sbtix_sbt2_3" type="jar" ext="jar" conf="compile"/>
       </publications>
       <dependencies></dependencies>
     </ivy-module>
 IVY_EOF
-ln -sf ivy.xml $ivyDir/ivys/ivy-${pluginVersion}.xml
+ln -sf ivy.xml "$ivyDir/ivys/ivy-${pluginVersion}.xml"
     '';
   }

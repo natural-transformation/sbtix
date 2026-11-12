@@ -13,7 +13,10 @@ let
 in
 sbtix.buildSbtLibrary {
   name = "sbtix-multibuild-two";
-  src = ./.;
+  # `cleanSource` drops the `result` links of earlier Nix builds, and
+  # `withoutSbtOutput` drops sbt's `target` directories. sbt 2 cannot read
+  # either of them inside the Nix sandbox.
+  src = sbtix.withoutSbtOutput (pkgs.lib.cleanSource ./.);
   repo = [ repoLock projectRepo manualRepo ];
   sbtixBuildInputs = sbtixInputs;
 }

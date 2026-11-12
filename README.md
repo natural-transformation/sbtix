@@ -6,6 +6,13 @@
 
 Sbtix generates a Nix definition that represents your SBT project's dependencies. It then uses this to build a Maven repo containing the stuff your project needs, and feeds it back to your SBT build.
 
+## Supported versions
+
+sbtix 2 works with **sbt 2.x** builds. It is built and tested with sbt 2.0.12.
+For an sbt 1.x build, stay on sbtix 1.2.8.
+
+Are you upgrading from sbtix 1.x? Read [MIGRATION.md](MIGRATION.md) first.
+
 ## Why?
 
 Currently, this should mean that you won't have to redownload the world for each rebuild.
@@ -27,17 +34,18 @@ This pipeline keeps your sbt workflow fast (dependency metadata is cached) while
 
 ## Why not? (caveats)
 
-* Sbtix 1.0.x is intended as the stable baseline for the current CLI, generated Nix, and builder APIs. Please report any regressions or missing offline artifacts.
+* sbtix 2 supports sbt 2.x builds only. Please report any regressions or missing offline artifacts.
 * Some sbt-internal tooling artifacts are not declared as normal project/library dependencies. sbtix locks the Scala 2.13 / Scala 3 compiler bridge (`org.scala-lang:scala2-sbt-bridge` / `org.scala-lang:scala3-sbt-bridge`) automatically, but you may still need to add rare missing artifacts to `manual-repo.nix`.
 * When sbtix enriches POM metadata for offline builds, it only fetches missing parent/BOM metadata from Maven Central. Private and Ivy repository metadata is locked when Coursier has already resolved or cached it; otherwise, add the missing metadata to `manual-repo.nix` so generation does not perform surprising authenticated network fetches.
 * sbtix detects `sbt-scalafmt` in `project/plugins.sbt` and locks the configured `.scalafmt.conf` formatter runtime automatically, so `scalafmtOnCompile` can run in sandboxed Nix builds. For other plugins that download tooling at runtime, either disable non-build tasks when `SBTIX_NIX_BUILD=1` / `-Dsbtix.nixBuild=true` is set, or add the missing artifacts to `manual-repo.nix`.
-* **Offline sbt bootstrap is pinned:** the generated `sbtix-plugin-repo.nix` (seeded from sbtix’s bundled template under `plugin/sbtix-plugin-repo.nix`) only includes sbt launcher/bootstrap artifacts for the sbt version shipped with sbtix (currently sbt `1.12.11`, e.g. `org.scala-sbt:main_2.12:1.12.11`). If your project uses a different `sbt.version` in `project/build.properties`, a sandboxed/offline `nix build` can fail unless those sbt boot artifacts are also available offline (typically by aligning `sbt.version`, or by manually pinning the missing sbt artifacts in `manual-repo.nix`).
+* **The sbt launcher is locked per project.** Before a build loads, the sbt launcher fetches sbt itself (`org.scala-sbt:sbt`) and the Scala version sbt runs on. sbtix locks those artifacts for the `sbt.version` in your `project/build.properties`, so the launcher can start in the Nix sandbox. When you change `sbt.version`, regenerate the lock files.
+* **Build from a clean source tree.** sbt 2 cannot read two kinds of entries inside the Nix sandbox: the `target` directories, which it fills with symlinks into its cache, and the `result` links of earlier Nix builds. A source that contains them can fail to build. Flake builds only see files tracked by git, and `sbtix-generated.nix` filters both out. In a Nix expression of your own that uses a working directory as `src`, write `src = sbtix.withoutSbtOutput (pkgs.lib.cleanSource ./.);`. `cleanSource` drops the `result` links, and `withoutSbtOutput` drops the `target` directories.
 
 ## How?
 
 Sbtix is intended to be used as a Nix-provided command-line tool. The tool
-loads a matching sbt plugin into a separate sbt global base while it generates
-`repo.nix` and `sbtix-generated.nix`. In normal projects, you should not add
+runs sbt on your build with the sbtix plugin added, and generates `repo.nix`
+and `sbtix-generated.nix`. In normal projects, you should not add
 sbtix to `project/plugins.sbt` yourself; using the Nix CLI keeps the plugin jar,
 Nix builders, templates, and generated source pin on the same sbtix version or
 commit.
@@ -59,7 +67,7 @@ nix build '.#sbtix'
 ./result/bin/sbtix --help
 ```
 
-sbtix provides a number of scripts to generate and update Nix expressions to fetch your dependencies and build your sbt project. These scripts work by opening your project in sbt and loading an additional sbtix plugin (via the `sbt.global.base` directory to `$HOME/.sbtix`). After generation, you don't need the sbtix command-line tools to actually build your project from nix.
+sbtix provides a number of scripts to generate and update Nix expressions to fetch your dependencies and build your sbt project. These scripts open your project in an sbt process of their own, with the sbtix plugin added (see [How sbtix runs sbt](#how-sbtix-runs-sbt)). After generation, you don't need the sbtix command-line tools to actually build your project from nix.
 
 ### Using sbtix from a flake (recommended)
 
@@ -79,7 +87,7 @@ Add an input and expose the sbtix CLI in your dev shell:
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Prefer a tag (or pinned commit) so the sbtix input is stable.
-    sbtix.url = "github:natural-transformation/sbtix/v1.2.8";
+    sbtix.url = "github:natural-transformation/sbtix/v2.0.0";
 
     # Optional: keep nixpkgs consistent across inputs.
     sbtix.inputs.nixpkgs.follows = "nixpkgs";
@@ -118,10 +126,9 @@ nix develop
 sbtix-gen-all2
 ```
 
-That path generates `sbtix-generated.nix`, `sbtix.nix`, and
-`sbtix-plugin-repo.nix` in addition to the `repo.nix` lockfiles. Commit those
-files only if your project actually imports the generated composition, for
-example through `default.nix`.
+That path generates `sbtix-generated.nix` and `sbtix.nix` in addition to the
+`repo.nix` lockfiles. Commit those files only if your project actually imports
+the generated composition, for example through `default.nix`.
 
 When sbtix is run from a flake-provided binary, `sbtix-generated.nix` embeds a
 pinned sbtix source reference (`builtins.fetchTree` / `fetchgit`) so downstream
@@ -139,21 +146,30 @@ let
 in
   sbtixLib.buildSbtProject {
     name = "my-app";
-    src = pkgs.lib.cleanSource ./.;
+    # `withoutSbtOutput` leaves sbt's `target` directories out of the build.
+    src = sbtixLib.withoutSbtOutput (pkgs.lib.cleanSource ./.);
     repo = [
       (import ./manual-repo.nix)
       (import ./repo.nix)
       (import ./project/repo.nix)
+      (import ./project/project/repo.nix)
     ];
-    buildPhase = ''
-      sbt assembly
-    '';
     installPhase = ''
+      sbt --server assembly
       mkdir -p $out/lib
-      cp target/scala-*/my-app.jar $out/lib/
+      # sbt 2 writes build output below target/out/jvm/scala-<version>/<name>/
+      find target -name 'my-app-assembly-*.jar' -exec cp {} $out/lib/ \;
     '';
   }
 ```
+
+`buildSbtProject` compiles the project in its build phase. Put your own sbt
+tasks in `installPhase`, as above, so they run after that setup.
+
+Always call `sbt --server <task>` in a phase of your own. A bare `sbt <task>`
+makes the sbt 2 runner use its thin client, which starts a background sbt
+server. That is slower, and it can fail inside the Nix sandbox. `--server` runs
+sbt in the foreground instead. The built-in phases already do this.
 
 For a project with an sbt-native-packager stage task, use `buildSbtProgram`.
 For a library, use `buildSbtLibrary`. For custom layouts such as assembly jars,
@@ -164,10 +180,46 @@ See [`examples/flake-app/flake.nix`](examples/flake-app/flake.nix) for a complet
 
 ### Sbtix commands
 
- * `sbtix` - loads the sbtix global plugin and launches sbt. Sets `sbt.global.base` directory to `$HOME/.sbtix`.
+ * `sbtix` - runs sbt on your build with the sbtix plugin added. Arguments are passed on to sbt, so `sbtix genNix` and `sbtix genComposition` run the sbtix tasks. Without arguments you get an sbt shell.
  * `sbtix-gen` - generates `repo.nix` lockfiles (including nested `project/**/repo.nix` layers as needed). Internally runs: `sbtix genNix`.
  * `sbtix-gen-all` - kept for backwards compatibility. Internally runs: `sbtix genNix`.
  * `sbtix-gen-all2` - generates `repo.nix` lockfiles (including nested `project/**/repo.nix` layers) **and runs `genComposition`** to render `sbtix-generated.nix`. Internally runs: `sbtix genComposition`.
+
+#### How sbtix runs sbt
+
+Every sbtix command starts an sbt process of its own. This is what it does, and
+what it leaves alone:
+
+* **It needs an sbt 2.x build.** If `project/build.properties` names an sbt 1.x
+  version, sbtix stops with a message and changes nothing.
+* **It does not use an sbt server.** A plain `sbt` command in an sbt 2 build is
+  a thin client that talks to a background sbt server. sbtix does not connect
+  to that server and does not start one. It runs sbt in the foreground and
+  exits when the commands are done. So you can run sbtix while an sbt server or
+  your IDE is running for the same build. That server keeps working, and sbtix
+  leaves no process behind.
+* **It uses its own sbt directories.** sbt's global base is `$HOME/.sbtix`, and
+  the Coursier cache is `$HOME/.sbtix/.coursier-cache`. Your personal global
+  sbt plugins and settings are not loaded, so they do not end up in the lock
+  files. The directory only holds downloads, sbt's caches, and `plugin-repo`,
+  a link to the plugin of the sbtix you ran last. You can delete
+  `$HOME/.sbtix` at any time.
+* **It loads the plugin of the sbtix you run.** sbt looks for the plugin in
+  the sbtix package first, before the other resolvers of your build. A plugin
+  with the same version in `~/.ivy2/local` does not replace it. sbtix does
+  not change anything in `~/.ivy2`.
+* **It adds the plugin through temporary files.** While sbtix runs, your build
+  holds `project/sbtix-auto-plugin-<pid>.sbt` and
+  `project/project/sbtix-auto-plugin-<pid>.sbt`. Next to every `metals.sbt`
+  that Metals generated under `project/`, it also adds
+  `zz-sbtix-generated-ide-plugin-compat-<pid>.sbt`, which keeps IDE-only
+  plugins out of the lock files. sbtix removes all of these files when it
+  exits. The files only have an effect in the sbt process that sbtix starts.
+  An sbt server or IDE that loads or reloads the build while they exist gets
+  no settings from them: it does not load the sbtix plugin, and it keeps its
+  own plugins. It may reload the build definition when the files appear, and
+  again once they are gone. If sbtix is killed hard (`kill -9`), delete the
+  leftover files yourself.
 
 By default, sbtix keeps verbose resolver diagnostics off for performance. To enable
 the full `[SBTIX_DEBUG]` output, set `SBTIX_DEBUG=1` (or pass `-Dsbtix.debug=true`).
@@ -207,9 +259,8 @@ Choose the regeneration flow that matches your Nix build entry point:
 
 ### Creating a build
 
-* For generated composition builds, run `sbtix genComposition` (or
-  `sbt genComposition` inside your project) to have sbtix emit
-  `sbtix-generated.nix` for you. The file is rendered from the same template
+* For generated composition builds, run `sbtix genComposition` to have sbtix
+  emit `sbtix-generated.nix` for you. The file is rendered from the same template
   used in our tests, so it already contains the sandbox-friendly `SBT_OPTS`,
   Ivy generation, and install logic. Check it in as-is and have your
   `default.nix` (or another entry point) simply import it.
@@ -218,8 +269,8 @@ Choose the regeneration flow that matches your Nix build entry point:
   for projects with a `stage` task, `buildSbtLibrary` for libraries, or
   `buildSbtProject` when you need a custom `installPhase`. In this flow, the
   generated `repo.nix` files are the source-control lockfiles;
-  `sbtix-generated.nix`, `sbtix.nix`, and `sbtix-plugin-repo.nix` are not
-  required unless your build imports them.
+  `sbtix-generated.nix` and `sbtix.nix` are not required unless your build
+  imports them.
 
 If you want a starting point, copy `default.nix.example` from this repository into your project. It simply imports the generated composition:
 
@@ -244,10 +295,13 @@ let
 in
     sbtix.buildSbtProgram {
         name = "sbtix-example";
-        src = pkgs.lib.cleanSource ./.;
+        # `withoutSbtOutput` leaves the `target` directories of a working tree
+        # out of the build. See the caveats above.
+        src = sbtix.withoutSbtOutput (pkgs.lib.cleanSource ./.);
         repo = [ (import ./manual-repo.nix)
                  (import ./repo.nix)
                  (import ./project/repo.nix)
+                 (import ./project/project/repo.nix)
                ];
     }
 ```
@@ -353,9 +407,20 @@ This used to be the only mechanism for handling local dependencies, but is now a
 
 ### Authentication
 
-In order to use a private repository, add your credentials to `coursierCredentials`. Note that the key should be the name of the repository, see
-`plugin/src/sbt-test/sbtix/private-auth/build.sbt` for an example! Also, you must currently set the credentials for each SBT subproject, `in ThisBuild`
-doesn't currently work. This is for consistency with Coursier-SBT.
+In order to use a private repository, add its credentials to sbt's `credentials` setting:
+
+```scala
+credentials += Credentials(
+  realm = "My realm",
+  host = "repo.example.com",
+  userName = "me",
+  passwd = "secret"
+)
+```
+
+sbtix picks the credentials by the host of the repository. Set them in every
+subproject that resolves from the repository; see
+`plugin/src/sbt-test/sbtix/private-auth/build.sbt` for an example.
 
 *Security note*: the repository username and password will be
 embedded in the `repo.nix`, and part of your nix store. Having
@@ -371,10 +436,10 @@ A: You probably need to add the following resolver to your project for Sbtix to 
 
 ```scala
 // if using PlayFramework
-resolvers += Resolver.url(
+resolvers += Resolver.uri(
   "sbt-plugin-releases",
-  url("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
-)(Resolver.ivyStylePatterns)
+  uri("https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/")
+)(using Resolver.ivyStylePatterns)
 ```
 
 Q: When I `nix-build` it sbt complains `java.io.IOException: Cannot run program "git": error=2, No such file or directory`

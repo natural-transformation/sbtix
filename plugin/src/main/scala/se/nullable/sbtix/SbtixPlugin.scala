@@ -59,25 +59,13 @@ object SbtixPlugin extends AutoPlugin {
     * we hard-code the SBT/Scala versions so that template updates happen together
     * with the plugin build definition.
     */
-  private def pluginIvyXml(
-      version: String,
-      publicationTimestamp: String,
-      artifact: String,
-      scalaBin: String,
-      sbtBin: String,
-      includeIvyPluginAttributes: Boolean
-  ): String = {
-    val pluginAttributes =
-      if (includeIvyPluginAttributes)
-        "\n        e:sbtVersion=\"" + sbtBin + "\"" +
-          "\n        e:scalaVersion=\"" + scalaBin + "\""
-      else ""
+  private def pluginIvyXml(version: String, publicationTimestamp: String, artifact: String): String =
     s"""<ivy-module version="2.0" xmlns:e="http://ant.apache.org/ivy/extra">
        |  <info organisation="se.nullable.sbtix"
        |        module="$artifact"
        |        revision="$version"
        |        status="release"
-       |        publication="$publicationTimestamp"$pluginAttributes>
+       |        publication="$publicationTimestamp">
        |    <description>
        |      sbtix plugin (locally provided for Nix build)
        |    </description>
@@ -96,7 +84,6 @@ object SbtixPlugin extends AutoPlugin {
        |  </publications>
        |  <dependencies></dependencies>
        |</ivy-module>""".stripMargin
-  }
 
   /** Shell snippet that runs inside the Nix build sandbox. It synthesizes a
     * minimal Ivy repository entry under `.ivy2-home` so that Coursier can resolve
@@ -110,36 +97,22 @@ object SbtixPlugin extends AutoPlugin {
       case major => major
     }
 
-  private def isSbt2Binary(sbtBin: String): Boolean =
-    sbtMajorBinary(sbtBin) == "2"
-
+  /** sbt 2 publishes plugins as `<name>_sbt<sbt major>_<scala binary>`, for
+    * example `sbtix_sbt2_3`.
+    */
   private def sbtixPluginArtifact(scalaBin: String, sbtBin: String): String =
-    if (isSbt2Binary(sbtBin)) s"sbtix_sbt${sbtMajorBinary(sbtBin)}_$scalaBin" else "sbtix"
+    s"sbtix_sbt${sbtMajorBinary(sbtBin)}_$scalaBin"
 
-  private def sbtixPluginLocalDir(scalaBin: String, sbtBin: String): String = {
-    val artifact = sbtixPluginArtifact(scalaBin, sbtBin)
-    if (isSbt2Binary(sbtBin)) s"se.nullable.sbtix/$artifact"
-    else s"se.nullable.sbtix/sbtix/scala_$scalaBin/sbt_$sbtBin"
-  }
+  private def sbtixPluginLocalDir(scalaBin: String, sbtBin: String): String =
+    s"se.nullable.sbtix/${sbtixPluginArtifact(scalaBin, sbtBin)}"
 
-  private def sbtixPluginRepoImports(sourceExpr: String, sbtBin: String): String = {
-    val repoPaths =
-      if (isSbt2Binary(sbtBin))
-        Seq(
-          "plugin/repo-sbt2.nix",
-          "plugin/repo.nix",
-          "plugin/project/repo.nix",
-          "plugin/nix-exprs/manual-repo.nix"
-        )
-      else
-        Seq(
-          "plugin/repo.nix",
-          "plugin/repo-sbt2.nix",
-          "plugin/project/repo.nix",
-          "plugin/nix-exprs/manual-repo.nix"
-        )
-    repoPaths.map(path => s"""    (import ($sourceExpr + "/$path"))""").mkString("\n")
-  }
+  /** The lock files of the sbtix plugin build, as imports from the sbtix source. */
+  private def sbtixPluginRepoImports(sourceExpr: String): String =
+    Seq(
+      "plugin/repo.nix",
+      "plugin/project/repo.nix",
+      "plugin/nix-exprs/manual-repo.nix"
+    ).map(path => s"""    (import ($sourceExpr + "/$path"))""").mkString("\n")
 
   // The plugin version we should bake into generated Nix. We must not rely on
   // `version.value`, because that would pick up the user's *project* version.
@@ -194,7 +167,7 @@ object SbtixPlugin extends AutoPlugin {
       .getOrElse("https://github.com/natural-transformation/sbtix")
     val pluginLocalDir = sbtixPluginLocalDir(pluginScalaBin, pluginSbtBin)
     val pluginArtifact = sbtixPluginArtifact(pluginScalaBin, pluginSbtBin)
-    val pluginRepoImports = sbtixPluginRepoImports("sbtixSource", pluginSbtBin)
+    val pluginRepoImports = sbtixPluginRepoImports("sbtixSource")
 
     // Prefer a pinned fetcher when possible.
     //
@@ -234,7 +207,7 @@ object SbtixPlugin extends AutoPlugin {
              |
              |  sbtixPluginIvy = sbtix.buildSbtLibrary {
              |    name = "sbtix-plugin";
-             |    src = cleanSource (sbtixSource + "/plugin");
+             |    src = sbtix.withoutSbtOutput (cleanSource (sbtixSource + "/plugin"));
              |    repo = sbtixPluginRepos;
              |  };
              |
@@ -263,7 +236,7 @@ object SbtixPlugin extends AutoPlugin {
                  |
                  |  sbtixPluginIvy = sbtix.buildSbtLibrary {
                  |    name = "sbtix-plugin";
-                 |    src = cleanSource (sbtixSource + "/plugin");
+                 |    src = sbtix.withoutSbtOutput (cleanSource (sbtixSource + "/plugin"));
                  |    repo = sbtixPluginRepos;
                  |  };
                  |
@@ -284,17 +257,7 @@ object SbtixPlugin extends AutoPlugin {
     val artifact = sbtixPluginArtifact(scalaBin, sbtBin)
     val localDir = sbtixPluginLocalDir(scalaBin, sbtBin)
     val pom = indentMultiline(pluginPomXml(version, artifact), "    ")
-    val ivy = indentMultiline(
-      pluginIvyXml(
-        version,
-        timestamp,
-        artifact,
-        scalaBin,
-        sbtBin,
-        includeIvyPluginAttributes = !isSbt2Binary(sbtBin)
-      ),
-      "    "
-    )
+    val ivy = indentMultiline(pluginIvyXml(version, timestamp, artifact), "    ")
     s"""ivyDir="./.ivy2-home/local/$localDir/$version"
 mkdir -p "$$ivyDir/jars" "$$ivyDir/ivys" "$$ivyDir/poms"
 if [ -n "$${pluginJar:-}" ] && [ -f "$$pluginJar" ]; then
@@ -584,16 +547,18 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
       Dependency(bridge)
     }.toSet
 
-  private def sbtBootRootDependencies(sbtVersion: String, sbtBinaryVersion: String, log: Logger): Set[Dependency] =
-    if (!sbtBinaryVersion.startsWith("2")) Set.empty[Dependency]
-    else {
-      val modules = Seq(ModuleID("org.scala-sbt", "sbt", sbtVersion))
-      SbtixDebug.info(log) {
-        val coordinates = modules.map(module => s"${module.organization}:${module.name}:${module.revision}").mkString(", ")
-        s"[SBTIX_DEBUG] Adding sbt boot roots for offline sbt 2 startup: $coordinates"
-      }
-      modules.map(Dependency(_)).toSet
+  /** The sbt launcher resolves `org.scala-sbt:sbt` (and with it the Scala
+    * version sbt runs on) before the build loads. Lock that classpath so sbt can
+    * start in an offline Nix sandbox.
+    */
+  private def sbtBootRootDependencies(sbtVersion: String, log: Logger): Set[Dependency] = {
+    val modules = Seq(ModuleID("org.scala-sbt", "sbt", sbtVersion))
+    SbtixDebug.info(log) {
+      val coordinates = modules.map(module => s"${module.organization}:${module.name}:${module.revision}").mkString(", ")
+      s"[SBTIX_DEBUG] Adding sbt boot roots for offline sbt startup: $coordinates"
     }
+    modules.map(Dependency(_)).toSet
+  }
 
   private val ScalafmtConfigVersion = """(?m)^\s*version\s*=\s*"?([^"\s#]+)"?\s*(?:#.*)?$""".r
 
@@ -864,13 +829,8 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
         runFetches(fetches, config)
     }
 
-  private def lockSbtBootArtifacts(config: FetcherConfig, sbtVersion: String, sbtBinaryVersion: String): FetchResult =
-    sbtBootRootDependencies(sbtVersion, sbtBinaryVersion, config.log).map(_.moduleId) match {
-      case modules if modules.nonEmpty =>
-        config.lockModuleClasspath(modules, fetchIfMissing = true)
-      case _ =>
-        FetchResult.empty
-    }
+  private def lockSbtBootArtifacts(config: FetcherConfig, sbtVersion: String): FetchResult =
+    config.lockModuleClasspath(sbtBootRootDependencies(sbtVersion, config.log).map(_.moduleId), fetchIfMissing = true)
 
   private def fetchPluginRepositories(
       pluginModuleIds: Set[ModuleID],
@@ -913,7 +873,7 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
         config.copy(lockPomDependencyArtifacts = true).lockModulePoms(pluginModuleIds)
       }
     val sbtBootArtifacts =
-      lockSbtBootArtifacts(config, sbtVersion, sbtBinaryVersion)
+      lockSbtBootArtifacts(config, sbtVersion)
     val result = FetchResult.combine(Seq(resolvedPluginArtifacts, rootPomArtifacts, sbtBootArtifacts))
     if (result.hasLockedArtifacts) Some((scalaVersion, result.repos, result.artifacts))
     else None
@@ -1015,7 +975,7 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
         // their original POM metadata is still needed to replay resolution offline.
         fetcherConfig.copy(lockEvictedModulePoms = true)
       val sbtBootArtifacts =
-        lockSbtBootArtifacts(fetcherConfig, sbtVer, sbtBinaryVersion.value)
+        lockSbtBootArtifacts(fetcherConfig, sbtVer)
       val fetchResult =
         FetchResult.combine(
           Seq(
@@ -1141,7 +1101,7 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
       // The sbtix plugin itself is an sbt plugin (loaded by the sbt launcher), so it must be
       // staged under the sbt-launcher Scala binary version (not the user's project Scala).
       //
-      // For sbt 1.x this is currently Scala 2.12, but we derive it from sbt's own
+      // sbt 2 runs on Scala 3. We derive the binary version from sbt's own
       // scalaProvider to avoid hardcoding it here.
       val sbtScalaFullVersion = appConfiguration.value.provider.scalaProvider.version
       val pluginScalaBinary = CrossVersion.binaryScalaVersion(sbtScalaFullVersion)
@@ -1179,8 +1139,8 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
         pluginJarObserved
       val versionFromPath =
         codeSourcePath.flatMap { path =>
-          val Snap = """.*/sbtix/scala_[^/]+/sbt_[^/]+/([^/]+)/jars/sbtix\.jar""".r
-          val IvySnap = """.*/sbtix/scala_[^/]+/sbt_[^/]+/([^/]+)/ivys/.*""".r
+          val Snap = """.*/sbtix_sbt[^/]+/([^/]+)/jars/sbtix_sbt[^/]+\.jar""".r
+          val IvySnap = """.*/sbtix_sbt[^/]+/([^/]+)/ivys/.*""".r
           path match {
             case Snap(ver)    => Some(ver)
             case IvySnap(ver) => Some(ver)
@@ -1349,36 +1309,6 @@ ln -sf ivy.xml "$$ivyDir/ivys/ivy-$version.xml""""
       } else {
         SbtixDebug.warn(log) { "[SBTIX_DEBUG genComposition] Falling back to empty manual-repo.nix" }
         IO.write(manualRepoTarget, "[]")
-      }
-      
-      // Ensure sbtix-plugin-repo.nix (bootstrap artifacts for sbt itself) is present
-      val pluginRepoTarget = new File(currentProjectBaseDir, "sbtix-plugin-repo.nix")
-      val expectedPluginRepo = new File(expectedDir, "sbtix-plugin-repo.nix")
-      val packagedPluginRepo = Seq(
-        new File(buildRootDir, "nix-exprs/sbtix-plugin-repo.nix"),
-        new File(buildRootDir, "plugin/nix-exprs/sbtix-plugin-repo.nix")
-      ).find(_.exists())
-      if (expectedPluginRepo.exists()) {
-        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying expected sbtix-plugin-repo.nix from ${expectedPluginRepo.getAbsolutePath}" }
-        IO.copyFile(expectedPluginRepo, pluginRepoTarget)
-      } else if (packagedPluginRepo.nonEmpty) {
-        val src = packagedPluginRepo.get
-        SbtixDebug.info(log) { s"[SBTIX_DEBUG genComposition] Copying packaged sbtix-plugin-repo.nix from ${src.getAbsolutePath}" }
-        IO.copyFile(src, pluginRepoTarget)
-      } else if (copyResource("sbtix-plugin-repo.nix", pluginRepoTarget)) {
-        SbtixDebug.info(log) { "[SBTIX_DEBUG genComposition] Extracted sbtix-plugin-repo.nix from plugin resources" }
-      } else {
-        val repoFallback = new File(buildRootDir, "repo.nix")
-        if (repoFallback.exists()) {
-          SbtixDebug.warn(log) {
-            s"[SBTIX_DEBUG genComposition] Plugin template missing sbtix-plugin-repo.nix; copying fallback from ${repoFallback.getAbsolutePath}"
-          }
-          IO.copyFile(repoFallback, pluginRepoTarget)
-        } else if (!pluginRepoTarget.exists()) {
-          SbtixDebug.warn(log) {
-            "[SBTIX_DEBUG genComposition] Could not locate sbtix-plugin-repo.nix; sbt bootstrap may require network access."
-          }
-        }
       }
     },
     
